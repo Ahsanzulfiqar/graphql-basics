@@ -1,0 +1,41 @@
+import {gql} from "apollo-server-express"
+
+
+
+// ? Scaler types =  String,Int,Boolean,ID,Float 
+module.exports = gql`
+  type Query {
+    getUser:String!
+  }
+    type Mutation {
+    LernerOnboarding(data: LernerOnboarding) : Learner!
+  }
+
+  type Subscription {
+  newMessage: String!
+  }
+
+
+type Learner {
+    id: ID!
+    FirstName:String!
+    LastName:String!
+    DateOfBirth:String!
+    EmiratesID:String!
+    Gender:String!
+    Department:String!
+    CourseTitle:String!
+    Email:String!
+}
+
+input LernerOnboarding {
+    FirstName:String!
+    LastName:String!
+    DateOfBirth:String!
+    EmiratesID:String!
+    Gender:String!
+    Department:String!
+    CourseTitle:String!
+    Email:String!
+}
+`;
