@@ -89,4 +89,6 @@ const main = async () => {
     );
   });
 };
+
+console.log("testing");
 main();
