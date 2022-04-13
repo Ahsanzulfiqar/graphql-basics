@@ -2,7 +2,6 @@ import express from "express";
 import { ApolloServer } from "apollo-server-express";
 import { GraphQLUpload, graphqlUploadExpress } from "graphql-upload";
 import cors from "cors";
-import { connectToDB, PORT } from "./utils";
 //must use lodash for project
 import _ from "lodash";
 //*For Subscriptions
@@ -13,14 +12,22 @@ import { useServer } from "graphql-ws/lib/use/ws";
 import { WebSocketServer } from "ws";
 import { PubSub } from "graphql-subscriptions";
 const pubsub = new PubSub();
-
+// *import files
+import { connectToDB, PORT } from "./utils";
+import { verifyToken } from "./auth/jwt/jwt";
+// * importing resolvers and typeDefs
 import resolvers from "./graphql/resolvers";
 import leanerTypeDefs from "./graphql/typeDefs/learner.graphql";
+import moeTypeDefs from "./graphql/typeDefs/moe.graphql";
+
 // * DB Connection
 connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
-const schema = makeExecutableSchema({ typeDefs: [leanerTypeDefs], resolvers });
+const schema = makeExecutableSchema({
+  typeDefs: [leanerTypeDefs, moeTypeDefs],
+  resolvers,
+});
 // ...
 // Create an Express app and HTTP server; we will attach both the WebSocket
 // server and the ApolloServer to this HTTP server.
@@ -50,9 +57,9 @@ const wsServer = new WebSocketServer({
 const serverCleanup = useServer(
   {
     schema,
-    context: {
-      pubsub,
-    },
+    // context: {
+    //   // pubsub,
+    // },
   },
   wsServer
 );
@@ -77,6 +84,20 @@ const server = new ApolloServer({
   ],
   context: {
     pubsub,
+  },
+
+  context: async ({ req }) => {
+    let currentUser;
+    let token;
+    if (req.headers.authorization) {
+      token = req.headers.authorization;
+      currentUser = await verifyToken(token, "accessToken");
+      return {
+        user: currentUser,
+        pubsub: pubsub,
+      };
+    }
+    return pubsub;
   },
 });
 const main = async () => {
