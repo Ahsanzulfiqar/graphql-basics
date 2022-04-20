@@ -1,15 +1,15 @@
-import {gql} from "apollo-server-express"
+import {
+  gql
+} from "apollo-server-express"
 
-
-
-// ? Scaler types =  String,Int,Boolean,ID,Float 
-module.exports = gql`
+module.exports = gql `
   type Query {
     getUser:String!
-  }
+  },
+
     type Mutation {
-    LernerOnboarding(data: LernerOnboarding) : Learner!
-  }
+          LernerOnboarding(data:String) : String
+  },
 
   type Subscription {
   newMessage: String!

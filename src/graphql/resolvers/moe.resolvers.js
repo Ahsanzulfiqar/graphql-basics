@@ -20,16 +20,37 @@ const { equals } = validator;
 
 // *Model
 import MOE from "../../models/Moe";
+import ISSUER from "../../models/Issuer";
 
 import { generateToken } from "../../auth/jwt/jwt";
 import { info } from "winston";
 
 module.exports = {
   Query: {
-    //   getUser: async (parent, args, context, info) => {
-    //     const user = "joi";
-    //     return user;
-    //   },
+    GetMOEDetails: async (parent, args, { pubsub, user }, info) => {
+      try {
+        console.log(user._id);
+        const isMoe = await MOE.findById(user._id);
+        if (!isMoe) throw new ApolloError("Record not found");
+        return isMoe;
+      } catch (error) {
+        console.log(error, "Catch Error");
+        throw new ApolloError(error);
+      }
+    },
+
+    GetPendingIssuerRequests: async (parent, args, { pubsub, user }, info) => {
+      try {
+        const pendingRequest = await ISSUER.find({
+          moeId: { $eq: user._id },
+          approved: { $eq: false },
+        });
+
+        return pendingRequest;
+      } catch (error) {
+        throw new Error(error);
+      }
+    },
   },
   Mutation: {
     MoeOnBoarding: async (parent, args, { pubsub }, info) => {
@@ -73,6 +94,9 @@ module.exports = {
             from: MAIL_USERNAME,
             to: savedMoe.adminEmail,
             subject: "Verification Mail",
+            message:
+              "you can active your account by clicking on activate button below",
+
             redirectUrl: "",
           };
           await OnBoarding_Mail(mail_Params);
@@ -81,7 +105,7 @@ module.exports = {
         }
       } catch (error) {
         console.log("Catch Error", error);
-        throw new Error(error);
+        throw new ApolloError(error);
       }
     },
 
@@ -172,13 +196,58 @@ module.exports = {
         throw new UserInputError(error);
       }
     },
+
+    ApprovedIssuer: async (parent, args, { pubsub, user }, info) => {
+      try {
+        const [isMoe, isIssuer] = await Promise.all([
+          MOE.findById(user._id),
+          ISSUER.findById(args.issuerId),
+        ]);
+
+        if (!isMoe) throw new AuthenticationError("Invalid MOE ID");
+        if (!isIssuer) throw new AuthenticationError("Invalid Issuer ID");
+
+        // * Change Approved Status of Issuer
+        isIssuer.approved = args.approved;
+        isIssuer.approvalDate = Date.now();
+        const savedIssuer = await isIssuer.save();
+
+        // * Creating JWtToken for issuer mail.
+        const jwtToken = await generateToken("emailToken", savedIssuer, "MOE");
+
+        // * Setting Email params
+        let mail_Params = {
+          from: MAIL_USERNAME,
+          to: savedIssuer.adminEmail,
+          subject: "",
+          message: "",
+          redirectUrl: "",
+        };
+        if (savedIssuer.approved) {
+          mail_Params.subject = "Approved Successfully";
+          mail_Params.message =
+            "you are successfully approved by ministry of education. Please click the link below for  verify your Account";
+        } else if (!savedIssuer.approved) {
+          mail_Params.subject = "Approval Request Rejected";
+          mail_Params.message =
+            "you request for approval is rejected by ministry of education. Please click the link below for more details";
+        }
+        // * Sending mail
+        await OnBoarding_Mail(mail_Params);
+        // * return Response
+        return "Issuer approval Status changed successfully.";
+      } catch (error) {
+        console.log(error, "CatchError");
+        throw new AuthenticationError(error);
+      }
+    },
   },
 
   Subscription: {
-    //   newMessage: {
-    //     subscribe(parent, args, { pubsub }, info) {
-    //       return pubsub.asyncIterator("MESSAGE");
-    //     },
-    //   },
+    newMessage: {
+      subscribe(parent, args, { pubsub }, info) {
+        return pubsub.asyncIterator("MESSAGE");
+      },
+    },
   },
 };

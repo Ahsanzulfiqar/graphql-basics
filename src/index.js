@@ -17,15 +17,17 @@ import { connectToDB, PORT } from "./utils";
 import { verifyToken } from "./auth/jwt/jwt";
 // * importing resolvers and typeDefs
 import resolvers from "./graphql/resolvers";
-import leanerTypeDefs from "./graphql/typeDefs/learner.graphql";
+
 import moeTypeDefs from "./graphql/typeDefs/moe.graphql";
+import issuerTypeDefs from "./graphql/typeDefs/issuer.graphql";
+import learnerTypeDefs from "./graphql/typeDefs/learner.graphql";
 
 // * DB Connection
 connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({
-  typeDefs: [leanerTypeDefs, moeTypeDefs],
+  typeDefs: [moeTypeDefs, issuerTypeDefs, learnerTypeDefs],
   resolvers,
 });
 // ...
@@ -111,5 +113,4 @@ const main = async () => {
   });
 };
 
-console.log("testing");
 main();

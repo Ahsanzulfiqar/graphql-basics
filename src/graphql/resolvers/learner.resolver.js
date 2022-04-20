@@ -16,40 +16,14 @@ import { OnBoarding_Mail } from "../../services/helper";
 
 module.exports = {
   Query: {
-    getUser: async (parent, args, context, info) => {
-      const user = "joi";
-      return user;
-    },
+    // getUser: async (parent, args, context, info) => {
+    //   const user = "joi";
+    //   return user;
+    // },
   },
   Mutation: {
-    LernerOnboarding: async (parent, args, { pubsub }, info) => {
-      try {
-        // * if validation Error return Error
-        // const isValidationErrors = await userRegistrationValidator(args)
-        // if (!isValidationErrors.valid) {
-        //   throw new ValidationError(JSON.stringify(isValidationErrors.errors))
-        // }
-
-        const learner = new Learner({
-          ...args.data,
-        });
-        const savedLearner = await learner.save();
-        //  * Send OnBoarding Request on Mail
-        let mail_Params = {
-          from: MAIL_USERNAME,
-          to: savedLearner.Email,
-          subject: "On Boarding Request",
-        };
-        await OnBoarding_Mail(mail_Params);
-        // publishing subscription
-        pubsub.publish("MESSAGE", {
-          newMessage: name,
-        });
-        return savedLearner;
-      } catch (error) {
-        console.error(new Error(error));
-        throw new Error(error);
-      }
+    LernerOnboarding: (parent, args, { pubsub, user }, info) => {
+      return "Ahsan";
     },
   },
 

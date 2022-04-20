@@ -109,7 +109,78 @@ const MoeOnBoardingValidation = (params) => {
   };
 };
 
+const issuerOnBoardingValidation = (params) => {
+  const { type, name, adminEmail, telephone, description, siteUrl } = params;
+  const errors = {};
+
+  if (isEmpty(type)) {
+    errors.type = "Type can not be Empty.";
+  }
+
+  // * Name Validation's
+
+  if (!/^[a-zA-Z]+$/.test(name)) {
+    errors.name = "Name contain letters only.";
+  }
+
+  if (
+    !isLength(name, {
+      min: 3,
+      max: 20,
+    })
+  ) {
+    errors.name = "Name must be in range of 3-20 characters.";
+  }
+
+  if (isEmpty(name)) {
+    errors.name = "Name cannot be Empty.";
+  }
+
+  if (typeof name != "string") {
+    errors.name = "Name must be a String.";
+  }
+
+  // * Admin Email Validation's
+  if (!isEmail(adminEmail)) {
+    errors.adminEmail = "Invalid Email";
+  }
+  if (isEmpty(adminEmail)) {
+    errors.adminEmail = "Email cannot be Empty.";
+  }
+
+  // * telePhone
+  if (isEmpty(telephone)) {
+    errors.telephone = "Phone cannot be Empty.";
+  }
+
+  // * siteUrl
+  if (typeof siteUrl != "string") {
+    errors.siteUrl = "siteUrl must be a String.";
+  }
+
+  if (isEmpty(telephone)) {
+    errors.telephone = "Phone cannot be Empty.";
+  }
+
+  if (isEmpty(description)) {
+    errors.description = "Description cannot be Empty.";
+  }
+
+  // * password Validation's
+  // ? let password = "joiRoot11!"
+  // ? isStrongPassword   =   minLength: 8, minLowercase: 1, minUppercase: 1, minNumbers: 1, minSymbols: 1
+  // if (!isStrongPassword(password)) {
+  //   errors.password = 'Password must contain atleast 1 Lowercase, Uppercase, Number, Symbol and 8 character long';
+  // }
+
+  return {
+    errors,
+    valid: Object.keys(errors).length < 1,
+  };
+};
+
 module.exports = {
   userRegistrationValidator,
   MoeOnBoardingValidation,
+  issuerOnBoardingValidation,
 };
