@@ -61,16 +61,16 @@ const schema = new mongoose.Schema(
       type: String,
     },
 
-    signature: {
-      imageUrl: {
-        type: String,
-        required: false,
-      },
-      uploadDate: {
-        type: Date,
-        required: false,
-      },
-    },
+    // signature: {
+    //   imageUrl: {
+    //     type: String,
+    //     required: false,
+    //   },
+    //   uploadDate: {
+    //     type: Date,
+    //     required: false,
+    //   },
+    // },
 
     publicKey: {
       type: String,

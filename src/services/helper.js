@@ -50,6 +50,10 @@ const OnBoarding_Mail = (params) => {
   );
 };
 
+
+
+
 module.exports = {
-  OnBoarding_Mail,
+  OnBoarding_Mail
+  
 };

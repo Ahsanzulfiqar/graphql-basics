@@ -26,7 +26,7 @@ module.exports = gql `
     # Issuer type  
     type Issuer {
         id: ID!
-        moeId:ID!
+        # moeId:ID!
         type:String!
         name: String!,
         adminEmail: String!,
@@ -35,7 +35,7 @@ module.exports = gql `
         address: address,
         siteUrl: String!,
         logoUrl: String,
-        signature:signature,
+        # signature:signature,
         publicKey: String,
         approved: Boolean,
         approvalDate: String,

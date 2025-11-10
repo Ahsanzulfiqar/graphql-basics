@@ -1,0 +1,92 @@
+import  {gql} from "apollo-server-express" 
+
+
+
+module.exports  =  gql`
+
+    type Query {
+    GetAllProducts: [Product!]!
+  GetProductById(_id: ID!): Product
+
+    }
+
+
+    type Mutation {
+        
+    CreateProduct( data: CreateProductInput!): Product!
+  UpdateProduct(_id: ID!, data: UpdateProductInput!): Product!
+
+    #  UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
+
+    },
+type Product {
+  _id: ID!
+  name: String!
+  brand: String!
+  sku: String!
+  barcode: String
+  description: String
+  category: String!
+  subCategory: String!
+  purchasePrice: Float!
+  salePrice: Float!
+  attributes: [Attribute]
+  isActive: Boolean!
+  images: [ProductImage]
+  createdAt: String
+  updatedAt: String
+}
+
+type Attribute {
+  name: String
+  value: String
+}
+
+type ProductImage {
+  url: String
+  alt: String
+}
+
+# --- Input Types ---
+input CreateProductInput {
+  name: String!
+  brand: String!
+  sku: String!
+  barcode: String
+  description: String
+  category: String!
+  subCategory: String!
+  purchasePrice: Float!
+  salePrice: Float!
+  attributes: [AttributeInput]
+  isActive: Boolean!
+  images: [ProductImageInput]
+}
+
+input UpdateProductInput {
+  name: String
+  brand: String
+  barcode: String
+  description: String
+  category: String
+  subCategory: String
+  purchasePrice: Float
+  salePrice: Float
+  attributes: [AttributeInput]
+  isActive: Boolean
+  images: [ProductImageInput]
+}
+
+input AttributeInput {
+  name: String
+  value: String
+}
+
+input ProductImageInput {
+  url: String
+  alt: String
+}
+
+
+
+`

@@ -1,0 +1,47 @@
+import  {gql} from "apollo-server-express" 
+
+module.exports  =  gql`
+
+    type Query {
+     GetAllWarehouses: [warehouse!]!
+     GetWarehouseById(_id: ID!): warehouse
+   
+    }
+
+
+    type Mutation {
+    CreateWarehouse(data:CreateWarehouseInput): String!
+     UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
+
+    },
+
+   type warehouse {
+    _id: ID!
+    name: String!
+    contact: String!
+    ismain: Boolean!
+    mainId: String!
+    country:String!
+    city:String!
+    }
+
+
+    input CreateWarehouseInput{
+      name:String!,
+      contact:String!,
+      ismain:Boolean!,
+      mainId:String!,
+      city:String!,
+      country:String!
+    }
+
+
+input UpdateWarehouseInput {
+  name: String
+  contact: String
+  ismain: Boolean
+  mainId: String
+  city:String
+  country:String
+}
+`

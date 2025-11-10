@@ -1,5 +1,5 @@
 import {
-  MoeOnBoardingValidation,
+  // MoeOnBoardingValidation,
   MAIL_USERNAME,
   hashPassword,
   comparePassword,
@@ -20,7 +20,7 @@ import validator from "validator";
 const { equals } = validator;
 
 // *Model
-import MOE from "../../models/Moe";
+import WAREHOUSE from "../../models/warehouse";
 import ISSUER from "../../models/Issuer";
 import COURSE from "../../models/Courses";
 import { generateToken } from "../../auth/jwt/jwt";
@@ -75,20 +75,20 @@ module.exports = {
             console.log(err.message < "Creating QRcode");
           });
 
-        const moe = await MOE.findOne();
+        // const moe = await MOE.findOne();
 
         // * Saved to db
-        const issuer = new ISSUER({
-          moeId: moe._id,
-          type: params.type,
-          name: params.name,
-          adminEmail: params.adminEmail,
-          telephone: params.telephone,
-          description: params.description,
-          siteUrl: params.siteUrl,
-          qrCode: qrCode,
-          secret: secret,
-        });
+        // const issuer = new ISSUER({
+        //   moeId: moe._id,
+        //   type: params.type,
+        //   name: params.name,
+        //   adminEmail: params.adminEmail,
+        //   telephone: params.telephone,
+        //   description: params.description,
+        //   siteUrl: params.siteUrl,
+        //   qrCode: qrCode,
+        //   secret: secret,
+        // });
 
         const savedIssuer = await issuer.save();
 
@@ -101,13 +101,13 @@ module.exports = {
         if (savedIssuer) {
           // * Sending verification mail
 
-          let mail_Params = {
-            from: savedIssuer.adminEmail,
-            to: moe.adminEmail,
-            subject: "Issuer onBoarding Request",
-            message: `${savedIssuer.name} Send ON Boarding request in our Platform`,
-            redirectUrl: "",
-          };
+          // let mail_Params = {
+          //   from: savedIssuer.adminEmail,
+          //   to: moe.adminEmail,
+          //   subject: "Issuer onBoarding Request",
+          //   message: `${savedIssuer.name} Send ON Boarding request in our Platform`,
+          //   redirectUrl: "",
+          // };
           await OnBoarding_Mail(mail_Params);
 
           return "Please check your Email for verification";
@@ -192,7 +192,7 @@ module.exports = {
           telephone: isIssuer.telephone,
           contactEmail: isIssuer.contactEmail,
           publicKey: isIssuer.publicKey,
-          signature: isIssuer.signature,
+          // signature: isIssuer.signature,
           logoImageUrl: isIssuer.logoUrl,
           siteUrl: isIssuer.siteUrl,
           isVerified: isIssuer.isVerified,

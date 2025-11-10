@@ -18,16 +18,18 @@ import { verifyToken } from "./auth/jwt/jwt";
 // * importing resolvers and typeDefs
 import resolvers from "./graphql/resolvers";
 
-import moeTypeDefs from "./graphql/typeDefs/moe.graphql";
+import warehouseTypeDefs from "./graphql/typeDefs/warehouse.graphql";
 import issuerTypeDefs from "./graphql/typeDefs/issuer.graphql";
 import learnerTypeDefs from "./graphql/typeDefs/learner.graphql";
+import productTypeDefs from "./graphql/typeDefs/product.graphql";
+
 
 // * DB Connection
 connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({
-  typeDefs: [moeTypeDefs, issuerTypeDefs, learnerTypeDefs],
+  typeDefs: [warehouseTypeDefs, issuerTypeDefs, learnerTypeDefs,productTypeDefs],
   resolvers,
 });
 // ...
