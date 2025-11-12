@@ -7,6 +7,8 @@ module.exports  =  gql`
     type Query {
     GetAllProducts: [Product!]!
   GetProductById(_id: ID!): Product
+  GetVariantsByProduct(productId: ID!): [ProductVariant!]!
+  GetVariantById(_id: ID!): ProductVariant
 
     }
 

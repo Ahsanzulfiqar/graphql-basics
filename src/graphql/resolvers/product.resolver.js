@@ -60,6 +60,28 @@ module.exports = {
       }
     },
 
+  GetVariantsByProduct: async (_, { productId }) => {
+      try {
+        const variants = await PRODUCTVARIANT.find({ product: productId }).sort({ createdAt: -1 });
+        return variants;
+      } catch (err) {
+        console.error("GetVariantsByProduct error:", err);
+        throw new Error("Failed to fetch variants for this product");
+      }
+    },
+
+      GetVariantById: async (_, { _id }) => {
+      try {
+        const variant = await PRODUCTVARIANT.findById(_id).populate("product");
+        if (!variant) {
+          throw new Error("Variant not found");
+        }
+        return variant;
+      } catch (err) {
+        console.error("GetVariantById error:", err);
+        throw new Error("Failed to fetch variant");
+      }
+    },
 
 
    
