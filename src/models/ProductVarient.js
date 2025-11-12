@@ -1,16 +1,14 @@
 import mongoose from "mongoose";
-import { type } from "os";
 import { CountryCodes } from "validator/lib/isISO31661Alpha2";
 
 
 const schema = new mongoose.Schema(
   {
-    name: {
+    product:{
       type: String,
       required: true,
-      trim: true,
     },
-    brand: {
+    name: {
       type: String,
       required: true,
       trim: true,
@@ -26,22 +24,6 @@ const schema = new mongoose.Schema(
       required: false,
       trim: true,
     },
-    description: {
-      type: String,
-      required: false,
-    },
-
-    category: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    subCategory: {
-      type: String,
-      required: true,
-      trim: true,
-    },
 
     purchasePrice: {
       type: Number,
@@ -55,9 +37,17 @@ const schema = new mongoose.Schema(
     attributes: [
       {
         name: String,  // "Size", "Flavor", "Strength"
-        value: String, // "60 capsules ", "Chocolate", "Extra Strong"
+        value: String, // "60 capsules", "Chocolate", "Extra Strong"
       },
     ],
+
+       packSize: {
+      type: Number,
+    },
+    netWeight: {
+      type: String,
+    },
+
 
     isActive: {
       type: Boolean,
@@ -77,7 +67,7 @@ const schema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("product", schema);
+module.exports = mongoose.model("productVarient", schema);
 
 
 

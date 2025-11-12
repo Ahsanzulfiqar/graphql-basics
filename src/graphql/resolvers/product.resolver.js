@@ -24,6 +24,8 @@ const { equals } = validator;
 
 // *Model
 import PRODUCT from "../../models/Product";
+import PRODUCTVARIANT from "../../models/ProductVarient";
+
 
 import { generateToken } from "../../auth/jwt/jwt";
 import { info } from "winston";
@@ -109,6 +111,99 @@ module.exports = {
         throw new Error("Failed to update product");
       }
     },
+
+     CreateProductVariant: async (_, { data }) => {
+      const {
+        productId,
+        name,
+        sku,
+        barcode,
+        purchasePrice,
+        salePrice,
+        attributes,
+        packSize,
+        netWeight,
+        isActive,
+        images,
+      } = data;
+
+      // Validate parent product exists
+      const product = await PRODUCT.findById(productId);
+      if (!product) {
+        throw new Error("Parent product not found");
+      }
+
+      // Create variant
+      try {
+        const variant = await PRODUCTVARIANT.create({
+          product: productId,
+          name,
+          sku,
+          barcode,
+          purchasePrice,
+          salePrice,
+          attributes: attributes || [],
+          packSize,
+          netWeight,
+          isActive: typeof isActive === "boolean" ? isActive : true,
+          images: images || [],
+        });
+
+        return variant;
+      } catch (err) {
+        // Common issues: duplicate SKU
+        console.error("CreateProductVariant error:", err);
+        if (err.code === 11000) {
+          throw new Error("SKU already exists");
+        }
+        throw new Error("Failed to create product variant");
+      }
+    },
+
+       // UPDATE
+    UpdateProductVariant: async (_, { _id, data }) => {
+      // Optional: if productId is sent, validate it
+    if (data && data.productId) {
+        const exists = await PRODUCT.findById(data.productId);
+        if (!exists) {
+          throw new Error("New parent product not found");
+        }
+      }
+
+      try {
+        const updated = await PRODUCTVARIANT.findByIdAndUpdate(
+          _id,
+          {
+            $set: {
+              ...(data.productId ? { product: data.productId } : {}),
+              ...(data.name !== undefined ? { name: data.name } : {}),
+              ...(data.sku !== undefined ? { sku: data.sku } : {}),
+              ...(data.barcode !== undefined ? { barcode: data.barcode } : {}),
+              ...(data.purchasePrice !== undefined ? { purchasePrice: data.purchasePrice } : {}),
+              ...(data.salePrice !== undefined ? { salePrice: data.salePrice } : {}),
+              ...(data.attributes !== undefined ? { attributes: data.attributes } : {}),
+              ...(data.packSize !== undefined ? { packSize: data.packSize } : {}),
+              ...(data.netWeight !== undefined ? { netWeight: data.netWeight } : {}),
+              ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+              ...(data.images !== undefined ? { images: data.images } : {}),
+            },
+          },
+          { new: true, runValidators: true }
+        );
+
+        if (!updated) throw new Error("Variant not found");
+        return updated;
+      } catch (err) {
+        console.error("UpdateProductVariant error:", err);
+        if (err.code === 11000) {
+          throw new Error("SKU already exists");
+        }
+        throw new Error("Failed to update product variant");
+      }
+    },
+  
+
+
   
   },
 

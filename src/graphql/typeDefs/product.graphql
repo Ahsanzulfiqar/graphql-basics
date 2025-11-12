@@ -15,6 +15,8 @@ module.exports  =  gql`
         
     CreateProduct( data: CreateProductInput!): Product!
   UpdateProduct(_id: ID!, data: UpdateProductInput!): Product!
+   CreateProductVariant(data: CreateProductVariantInput!): ProductVariant!
+  UpdateProductVariant(_id: ID!, data: UpdateProductVariantInput!): ProductVariant!
 
     #  UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
 
@@ -37,6 +39,24 @@ type Product {
   updatedAt: String
 }
 
+type ProductVariant {
+  _id: ID!
+  product: ID!          # or Product! if you want to populate/resolve
+  name: String!
+  sku: String!
+  barcode: String
+  purchasePrice: Float
+  salePrice: Float
+  attributes: [ProductVariantAttribute!]
+  packSize: Int
+  netWeight: String
+  isActive: Boolean
+  images: [ProductImage!]
+  createdAt: String
+  updatedAt: String
+}
+
+
 type Attribute {
   name: String
   value: String
@@ -46,6 +66,14 @@ type ProductImage {
   url: String
   alt: String
 }
+
+
+
+type ProductVariantAttribute {
+  name: String
+  value: String
+}
+
 
 # --- Input Types ---
 input CreateProductInput {
@@ -86,6 +114,45 @@ input ProductImageInput {
   url: String
   alt: String
 }
+
+input ProductImageInput {
+  url: String
+  alt: String
+}
+
+input ProductVariantAttributeInput {
+  name: String
+  value: String
+}
+
+input CreateProductVariantInput {
+  productId: ID!
+  name: String!
+  sku: String!
+  barcode: String
+  purchasePrice: Float
+  salePrice: Float
+  attributes: [ProductVariantAttributeInput!]
+  packSize: Int
+  netWeight: String
+  isActive: Boolean
+  images: [ProductImageInput!]
+}
+
+input UpdateProductVariantInput {
+  productId: ID
+  name: String
+  sku: String
+  barcode: String
+  purchasePrice: Float
+  salePrice: Float
+  attributes: [ProductVariantAttributeInput!]
+  packSize: Int
+  netWeight: String
+  isActive: Boolean
+  images: [ProductImageInput!]
+}
+
 
 
 
