@@ -2,7 +2,7 @@ import  {gql} from "apollo-server-express"
 
 
 
-module.exports  =  gql`
+const productTypeDefs =  gql`
 
     type Query {
     GetAllProducts: [Product!]!
@@ -159,3 +159,4 @@ input UpdateProductVariantInput {
 
 
 `
+export default productTypeDefs;

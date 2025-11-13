@@ -1,6 +1,6 @@
 import  {gql} from "apollo-server-express" 
 
-module.exports  =  gql`
+const warehouseTypeDefs  = gql`
 
     type Query {
      GetAllWarehouses: [warehouse!]!
@@ -45,3 +45,4 @@ input UpdateWarehouseInput {
   country:String
 }
 `
+export default warehouseTypeDefs;

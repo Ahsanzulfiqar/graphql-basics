@@ -18,10 +18,10 @@ import { verifyToken } from "./auth/jwt/jwt";
 // * importing resolvers and typeDefs
 import resolvers from "./graphql/resolvers";
 
-import warehouseTypeDefs from "./graphql/typeDefs/warehouse.graphql";
-import issuerTypeDefs from "./graphql/typeDefs/issuer.graphql";
-import learnerTypeDefs from "./graphql/typeDefs/learner.graphql";
-import productTypeDefs from "./graphql/typeDefs/product.graphql";
+import warehouseTypeDefs from "./graphql/typeDefs/warehouse.typeDefs";
+import issuerTypeDefs from "./graphql/typeDefs/issuer.typeDefs";
+import learnerTypeDefs from "./graphql/typeDefs/learner.typeDefs";
+import productTypeDefs from "./graphql/typeDefs/product.typeDefs";
 
 
 // * DB Connection

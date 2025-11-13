@@ -1,8 +1,6 @@
-import {
-  gql
-} from "apollo-server-express"
+import { gql } from 'graphql-tag';
 
-module.exports = gql `
+const learnerTypeDefs = gql `
   type Query {
     getUser:String!
   },
@@ -38,4 +36,6 @@ input LernerOnboarding {
     CourseTitle:String!
     Email:String!
 }
-`;
+`
+
+export default learnerTypeDefs;

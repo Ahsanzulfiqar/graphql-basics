@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-    "start": "nodemon src/index.js --ext js,graphql --exec babel-node",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+"scripts": {
+  "dev": "nodemon --exec \"./node_modules/.bin/babel-node src/index.js\""
+},
+
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -44,6 +44,10 @@
     "ws": "^8.5.0"
   },
   "devDependencies": {
+    "@babel/cli": "^7.28.3",
+    "@babel/core": "^7.28.5",
+    "@babel/node": "^7.28.0",
+    "@babel/preset-env": "^7.28.5",
     "nodemon": "^1.19.4"
   }
 }

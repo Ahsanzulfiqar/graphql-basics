@@ -1,8 +1,8 @@
-import {
-    gql
-} from "apollo-server-express"
+import { gql } from 'graphql-tag';
 
-module.exports = gql `
+
+
+const issuerTypeDefs = gql `
 
     type Query {
      GetIssuerDetail: Issuer!
@@ -100,3 +100,4 @@ module.exports = gql `
        }
        
 `
+export default issuerTypeDefs;
