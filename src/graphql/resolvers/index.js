@@ -23,9 +23,9 @@ module.exports = {
 
   },
 
-   PurchaseItem: {
-    ...purchaseResolver.PurchaseItem,
-  },
+  //  PurchaseItem: {
+  //   ...purchaseResolver.PurchaseItem,
+  // },
   Subscription: {
     // ...moeResolvers.Subscription,
     // ...issuerResolvers.Subscription,

@@ -9,14 +9,9 @@ const purchaseResolvers = {
 
 Query:{
 
-   // ✅ Get all purchases (newest first)
-    GetAllPurchases: async () => {
+     GetAllPurchases: async () => {
       try {
-        const purchases = await PURCHASE.find()
-          .sort({ createdAt: -1 })
-          .populate("items.product")
-          .populate("items.variant");
-
+        const purchases = await PURCHASE.find().sort({ createdAt: -1 });
         return purchases;
       } catch (err) {
         console.error("GetAllPurchases error:", err);
@@ -24,16 +19,12 @@ Query:{
       }
     },
 
-       GetPurchaseById: async (_, { _id }) => {
+   GetPurchaseById: async (_, { _id }) => {
       try {
-        const purchase = await PURCHASE.findById(_id)
-          .populate("items.product")
-          .populate("items.variant");
-
+        const purchase = await PURCHASE.findById(_id);
         if (!purchase) {
           throw new Error("Purchase not found");
         }
-
         return purchase;
       } catch (err) {
         console.error("GetPurchaseById error:", err);
@@ -45,18 +36,18 @@ Query:{
 },
 
   // Map populated Mongoose docs → GraphQL types (ProductBasic & ProductVariantBasic)
-  PurchaseItem: {
-    product: (parent) => {
-      const p = parent.product;
-      if (!p) return null;
-      return { _id: p._id, name: p.name, sku: p.sku };
-    },
-    variant: (parent) => {
-      const v = parent.variant;
-      if (!v) return null;
-      return { _id: v._id, name: v.name, sku: v.sku };
-    },
-  },
+//   PurchaseItem: {
+//     product: (parent) => {
+//       const p = parent.product;
+//       if (!p) return null;
+//       return { _id: p._id, name: p.name, sku: p.sku };
+//     },
+//     variant: (parent) => {
+//       const v = parent.variant;
+//       if (!v) return null;
+//       return { _id: v._id, name: v.name, sku: v.sku };
+//     },
+//   },
 
 
 
@@ -76,28 +67,29 @@ Query:{
         throw new Error("At least one item is required in a purchase");
       }
 
-      // (Optional but good) validate warehouse exists
+      console.log(warehouseId , "in")
+      // Optional: validate warehouse exists
       const warehouseExists = await WAREHOUSE.findById(warehouseId);
       if (!warehouseExists) {
         throw new Error("Warehouse not found");
       }
 
-      // Build items array with lineTotal
       let subTotal = 0;
-
       const itemDocs = [];
+
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
 
-        // Optional: validate product
+        // Fetch product
         const product = await PRODUCT.findById(item.productId);
         if (!product) {
           throw new Error(`Product not found for item index ${i}`);
         }
-
-        // Optional: validate variant if provided
+        console.log(product,"product")
+        // Fetch variant if provided
+        let variant = null;
         if (item.variantId) {
-          const variant = await PRODUCTVARIANT.findById(item.variantId);
+          variant = await PRODUCTVARIANT.findById(item.variantId);
           if (!variant) {
             throw new Error(`Variant not found for item index ${i}`);
           }
@@ -105,10 +97,13 @@ Query:{
 
         const lineTotal = item.quantity * item.purchasePrice;
         subTotal += lineTotal;
-
+         console.log()
         itemDocs.push({
           product: item.productId,
           variant: item.variantId || null,
+          productName: product.name,
+          variantName: variant ? variant.name : null,
+          sku: variant ? variant.sku : product.sku,
           quantity: item.quantity,
           purchasePrice: item.purchasePrice,
           lineTotal,
@@ -126,13 +121,13 @@ Query:{
           invoiceNo,
           warehouse: warehouseId,
           purchaseDate: purchaseDate ? new Date(purchaseDate) : undefined,
-          status: "confirmed", // or "draft" if you prefer
+          status: "confirmed", // or "draft" if you want
           items: itemDocs,
           subTotal,
           taxAmount: tax,
           totalAmount,
           notes,
-          postedToStock: false, // will stay false until you "ReceivePurchase"
+          postedToStock: false,
         });
 
         return purchase;

@@ -11,10 +11,24 @@ const purchaseItemSchema = new Schema(
       ref: "product",
       required: true,
     },
+    productName:{
+      type: String,
+      required: true,
+    },
     variant: {
       type: Schema.Types.ObjectId,
       ref: "productVarient",
     },
+    variantName:{
+      type: String,
+      required: true,
+    },
+    
+ sku:{
+      type: String,
+      required: true,
+    },
+
     quantity: {
       type: Number,
       required: true,

@@ -3,7 +3,7 @@ import { gql } from 'graphql-tag';
 const purchaseTypeDefs = gql `
   type Query {
  GetAllPurchases: [Purchase!]!
-  GetPurchaseById(_id: ID!): Purchase
+ GetPurchaseById(_id: ID!): Purchase
   },
 
     type Mutation {
@@ -16,14 +16,20 @@ const purchaseTypeDefs = gql `
 
 
 type PurchaseItem {
-  product: ProductBasic!        # or Product! if you want to populate later
-  variant: ProductVariantBasic
+  product: String!        # or Product! if you want to populate later
+  variant: String
+  productName: String
+  sku: String
+  variantName: String
   quantity: Int!
   purchasePrice: Float!
   lineTotal: Float!
   batchNo: String
   expiryDate: String
 }
+
+
+
 
 type Purchase {
   _id: ID!
@@ -40,18 +46,6 @@ type Purchase {
   postedToStock: Boolean!
   createdAt: String!
   updatedAt: String!
-}
-
-type ProductBasic {
-  _id: ID!
-  name: String!
-  sku: String
-}
-
-type ProductVariantBasic {
-  _id: ID!
-  name: String!
-  sku: String
 }
 
 
@@ -73,7 +67,6 @@ input CreatePurchaseInput {
   taxAmount: Float
   notes: String
 }
-
 
 `
 
