@@ -8,6 +8,7 @@ const purchaseTypeDefs = gql `
 
     type Mutation {
           CreatePurchase(data: CreatePurchaseInput!): Purchase!
+           ReceivePurchase(purchaseId: ID!): Purchase!
   },
 
   type Subscription {
