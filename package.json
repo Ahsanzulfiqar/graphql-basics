@@ -3,10 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-"scripts": {
-  "dev": "nodemon --exec \"./node_modules/.bin/babel-node src/index.js\""
-},
-
+  "scripts": {
+    "dev": "nodemon --exec \"./node_modules/.bin/babel-node src/index.js\""
+  },
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -28,6 +27,7 @@
     "graphql-ws": "^5.6.3",
     "handlebars": "^4.7.7",
     "http": "0.0.1-security",
+    "is-plain-object": "^5.0.0",
     "jsonwebtoken": "^8.5.1",
     "lodash": "^4.17.21",
     "mongoose": "^6.2.6",

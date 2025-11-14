@@ -1,11 +1,13 @@
 import mongoose from "mongoose";
-import { CountryCodes } from "validator/lib/isISO31661Alpha2";
+const { Schema, model } = mongoose;
 
 
-const schema = new mongoose.Schema(
+
+const productSchema = new Schema(
   {
     product:{
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "product",
       required: true,
     },
     name: {
@@ -67,7 +69,9 @@ const schema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("productVarient", schema);
+export default model("productVarient",productSchema)
+
+
 
 
 

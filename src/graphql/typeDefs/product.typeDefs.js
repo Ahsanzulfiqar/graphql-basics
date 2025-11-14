@@ -16,9 +16,9 @@ const productTypeDefs =  gql`
     type Mutation {
         
     CreateProduct( data: CreateProductInput!): Product!
-  UpdateProduct(_id: ID!, data: UpdateProductInput!): Product!
+    UpdateProduct(_id: ID!, data: UpdateProductInput!): Product!
    CreateProductVariant(data: CreateProductVariantInput!): ProductVariant!
-  UpdateProductVariant(_id: ID!, data: UpdateProductVariantInput!): ProductVariant!
+    UpdateProductVariant(_id: ID!, data: UpdateProductVariantInput!): ProductVariant!
 
     #  UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
 
@@ -91,6 +91,7 @@ input CreateProductInput {
   attributes: [AttributeInput]
   isActive: Boolean!
   images: [ProductImageInput]
+  # variants: [CreateProductVariantInlineInput]
 }
 
 input UpdateProductInput {
@@ -110,11 +111,6 @@ input UpdateProductInput {
 input AttributeInput {
   name: String
   value: String
-}
-
-input ProductImageInput {
-  url: String
-  alt: String
 }
 
 input ProductImageInput {
@@ -156,6 +152,19 @@ input UpdateProductVariantInput {
 }
 
 
+# Inline variant spec used only when creating a product
+input CreateProductVariantInlineInput {
+  name: String!
+  sku: String!
+  barcode: String
+  purchasePrice: Float
+  salePrice: Float
+  attributes: [ProductVariantAttributeInput!]
+  packSize: Int
+  netWeight: String
+  isActive: Boolean
+  images: [ProductImageInput!]
+}
 
 
 `

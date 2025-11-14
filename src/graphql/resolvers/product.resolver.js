@@ -93,6 +93,8 @@ module.exports = {
        // ✅ Create Product
     CreateProduct: async (_, { data }) => {
       try {
+
+        console.log(data, "data")
    
          const newProduct = await PRODUCT.create({
           name: data.name,

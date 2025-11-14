@@ -2,6 +2,9 @@ import warehouseResolvers from "./warehouse.resolvers";
 import issuerResolvers from "./issuer.resolver";
 import learnerResolver from "./learner.resolver";
 import productResolver from "./product.resolver";
+import purchaseResolver from "./purchase.resolver";
+
+
 
 module.exports = {
   Query: {
@@ -9,12 +12,19 @@ module.exports = {
     ...issuerResolvers.Query,
     ...learnerResolver.Query,
     ...productResolver.Query,
+    ...purchaseResolver.Query
   },
   Mutation: {
     ...warehouseResolvers.Mutation,
     ...issuerResolvers.Mutation,
     ...learnerResolver.Mutation,
     ...productResolver.Mutation,
+    ...purchaseResolver.Mutation
+
+  },
+
+   PurchaseItem: {
+    ...purchaseResolver.PurchaseItem,
   },
   Subscription: {
     // ...moeResolvers.Subscription,
