@@ -1,5 +1,6 @@
-import { sign, verify } from "jsonwebtoken";
-import { SECRET } from ".././../utils";
+import pkg from 'jsonwebtoken';
+const { sign, verify } = pkg;
+import { SECRET } from ".././../utils/config.js";
 import {
   ValidationError,
   UserInputError,
@@ -17,25 +18,25 @@ import {
 
 const common = {
   accessToken: {
-    secret: process.env.SECRET,
+    secret: SECRET,
     signOptions: {
       expiresIn: "7d",
     },
   },
   refreshToken: {
-    secret: process.env.SECRET,
+    secret: SECRET,
     signOptions: {
       expiresIn: "1d",
     },
   },
   emailToken: {
-    secret: process.env.SECRET,
+    secret: SECRET,
     signOptions: {
       expiresIn: "1h",
     },
   },
   resetPassword: {
-    secret: process.env.SECRET,
+    secret: SECRET,
     signOptions: {
       expiresIn: "1h",
     },

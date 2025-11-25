@@ -1,39 +1,13 @@
 
-import {
-  // MoeOnBoardingValidation,
-  MAIL_USERNAME,
-  hashPassword,
-  comparePassword,
-} from "../../utils";
-import { streamToBuffer} from "../../services/helper";
-import Speakeasy from "speakeasy";
-import QRCode from "qrcode";
-import {
-  ValidationError,
-  UserInputError,
-  ApolloError,
-  AuthenticationError,
-  SyntaxError,
-  ForbiddenError,
-} from "apollo-server-express";
+
 import validator from "validator";
-const { equals } = validator;
+import PRODUCT from "../../models/Product.js";
+import PRODUCTVARIANT from "../../models/ProductVarient.js";
 
 
 
 
-// *Model
-import PRODUCT from "../../models/Product";
-import PRODUCTVARIANT from "../../models/ProductVarient";
-
-
-import { generateToken } from "../../auth/jwt/jwt";
-import { info } from "winston";
-
-
-module.exports = {
-
-
+const productResolvers = {
   Query: {
     
      // ✅ Get all products
@@ -72,11 +46,12 @@ module.exports = {
 
       GetVariantById: async (_, { _id }) => {
       try {
-        const variant = await PRODUCTVARIANT.findById(_id).populate("product");
-        if (!variant) {
-          throw new Error("Variant not found");
-        }
-        return variant;
+        const variant = await PRODUCTVARIANT.findById(_id);
+        if(variant)
+          return variant
+          else throw new Error("Variant not found");
+        
+        
       } catch (err) {
         console.error("GetVariantById error:", err);
         throw new Error("Failed to fetch variant");
@@ -94,8 +69,6 @@ module.exports = {
     CreateProduct: async (_, { data }) => {
       try {
 
-        console.log(data, "data")
-   
          const newProduct = await PRODUCT.create({
           name: data.name,
           brand: data.brand,
@@ -118,6 +91,7 @@ module.exports = {
       }
     },
 
+
      // ✅ Update Product
     UpdateProduct: async (_, { _id, data }) => {
       try {
@@ -137,6 +111,7 @@ module.exports = {
     },
 
      CreateProductVariant: async (_, { data }) => {
+      console.log("inside")
       const {
         productId,
         name,
@@ -156,7 +131,7 @@ module.exports = {
       if (!product) {
         throw new Error("Parent product not found");
       }
-
+// console.log(product,"product")
       // Create variant
       try {
         const variant = await PRODUCTVARIANT.create({
@@ -239,3 +214,6 @@ module.exports = {
     },
   },
 };
+
+
+export default productResolvers;

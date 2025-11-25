@@ -36,7 +36,7 @@ type Product {
   salePrice: Float!
   attributes: [Attribute]
   isActive: Boolean!
-  images: [ProductImage]
+  images: [ProductImage]!
   createdAt: String
   updatedAt: String
 }
@@ -46,16 +46,16 @@ type ProductVariant {
   product: ID!          # or Product! if you want to populate/resolve
   name: String!
   sku: String!
-  barcode: String
-  purchasePrice: Float
-  salePrice: Float
+  barcode: String!
+  purchasePrice: Float!
+  salePrice: Float!
   attributes: [ProductVariantAttribute!]
-  packSize: Int
-  netWeight: String
-  isActive: Boolean
+  packSize: Int!
+  netWeight: String!
+  isActive: Boolean!
   images: [ProductImage!]
-  createdAt: String
-  updatedAt: String
+  createdAt: String!
+  updatedAt: String!
 }
 
 
@@ -98,6 +98,7 @@ input UpdateProductInput {
   name: String
   brand: String
   barcode: String
+  sku: String
   description: String
   category: String
   subCategory: String

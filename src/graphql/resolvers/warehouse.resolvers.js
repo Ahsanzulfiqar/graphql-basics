@@ -1,10 +1,4 @@
-import {
-  // MoeOnBoardingValidation,
-  MAIL_USERNAME,
-  hashPassword,
-  comparePassword,
-} from "../../utils";
-import { OnBoarding_Mail } from "../../services/helper";
+
 import Speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import {
@@ -19,13 +13,11 @@ import validator from "validator";
 const { equals } = validator;
 
 // *Model
-import WAREHOUSE from "../../models/warehouse";
-import ISSUER from "../../models/Issuer";
+import WAREHOUSE from "../../models/warehouse.js";
 
-import { generateToken } from "../../auth/jwt/jwt";
-import { info } from "winston";
 
-module.exports = {
+
+const warehouseResolvers = {
   Query: {
     GetAllWarehouses: async () => {
       try {
@@ -113,3 +105,4 @@ module.exports = {
     },
   },
 };
+ export default warehouseResolvers 

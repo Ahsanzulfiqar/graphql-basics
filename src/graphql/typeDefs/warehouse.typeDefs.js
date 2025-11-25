@@ -25,6 +25,8 @@ const warehouseTypeDefs  = gql`
     city:String!
     }
 
+    
+
 
     input CreateWarehouseInput{
       name:String!,

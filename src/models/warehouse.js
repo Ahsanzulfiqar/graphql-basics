@@ -1,8 +1,7 @@
 import mongoose from "mongoose";
-import { type } from "os";
-import { CountryCodes } from "validator/lib/isISO31661Alpha2";
+const { Schema, model } = mongoose;
 
-const schema = new mongoose.Schema(
+const warehouseSchema = new mongoose.Schema(
   {
   name: {
       type: String,
@@ -83,4 +82,4 @@ const schema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("warehouse", schema);
+export default model("warehouseSchema", warehouseSchema);

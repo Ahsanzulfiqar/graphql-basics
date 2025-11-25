@@ -1,4 +1,7 @@
 import express from "express";
+import path from "path"
+import { fileURLToPath } from "url";
+
 import { ApolloServer } from "apollo-server-express";
 import { GraphQLUpload, graphqlUploadExpress } from "graphql-upload";
 import cors from "cors";
@@ -13,17 +16,23 @@ import { WebSocketServer } from "ws";
 import { PubSub } from "graphql-subscriptions";
 const pubsub = new PubSub();
 // *import files
-import { connectToDB, PORT } from "./utils";
-import { verifyToken } from "./auth/jwt/jwt";
+
+import {connectToDB} from "./utils/db.js";
+import {PORT} from "./utils/config.js";
+
+
+import { generateToken, verifyToken } from "./auth/jwt/jwt.js";
+
 // * importing resolvers and typeDefs
-import resolvers from "./graphql/resolvers";
+import resolvers from "./graphql/resolvers/index.js";
 
-import warehouseTypeDefs from "./graphql/typeDefs/warehouse.typeDefs";
-import issuerTypeDefs from "./graphql/typeDefs/issuer.typeDefs";
-import learnerTypeDefs from "./graphql/typeDefs/learner.typeDefs";
-import productTypeDefs from "./graphql/typeDefs/product.typeDefs";
-import purchaseTypeDefs from "./graphql/typeDefs/purchase.typeDefs";
 
+import warehouseTypeDefs from "./graphql/typeDefs/warehouse.typeDefs.js";
+import productTypeDefs from "./graphql/typeDefs/product.typeDefs.js";
+import purchaseTypeDefs from "./graphql/typeDefs/purchase.typeDefs.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 
 // * DB Connection
@@ -31,7 +40,7 @@ connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({
-  typeDefs: [warehouseTypeDefs, issuerTypeDefs, learnerTypeDefs,productTypeDefs, purchaseTypeDefs],
+  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs],
   resolvers,
 });
 // ...
