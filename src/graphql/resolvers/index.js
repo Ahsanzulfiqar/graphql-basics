@@ -4,11 +4,14 @@ import purchaseResolver from "./purchase.resolver.js";
 
 
 
+
+
 const resolvers = {
   Query: {
     ...warehouseResolvers.Query,
     ...productResolver.Query,
-    ...purchaseResolver.Query
+    ...purchaseResolver.Query,
+  
   },
   Mutation: {
     ...warehouseResolvers.Mutation,

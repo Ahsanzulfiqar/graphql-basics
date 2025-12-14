@@ -4,40 +4,44 @@ const purchaseTypeDefs = gql `
   type Query {
  GetAllPurchases: [Purchase!]!
  GetPurchaseById(_id: ID!): Purchase
+FilterPurchases(filter: PurchaseFilterInput, page: Int = 1, limit: Int = 20): PurchasePage!
   },
 
     type Mutation {
           CreatePurchase(data: CreatePurchaseInput!): Purchase!
            ReceivePurchase(purchaseId: ID!): Purchase!
+            UpdatePurchase(id: ID!, data: UpdatePurchaseInput!): Purchase!
   },
 
   type Subscription {
   newMessage: String!
   }
+  
 
 
+scalar Date
+
+"Line item for each product in a purchase"
 type PurchaseItem {
-  product: String!        # or Product! if you want to populate later
-  variant: String
-  productName: String
-  sku: String
-  variantName: String
+  product: ID!
+  productName: String!
+  variant: ID!
+  variantName: String!
+  sku: String!
   quantity: Int!
   purchasePrice: Float!
   lineTotal: Float!
   batchNo: String
-  expiryDate: String
+  expiryDate: Date
 }
 
-
-
-
+"Main Purchase document"
 type Purchase {
   _id: ID!
   supplierName: String!
   invoiceNo: String
-  warehouse: ID!        # or Warehouse!
-  purchaseDate: String!
+  warehouse: ID!          # warehouse ObjectId
+  purchaseDate: Date!
   status: String!
   items: [PurchaseItem!]!
   subTotal: Float!
@@ -45,29 +49,78 @@ type Purchase {
   totalAmount: Float!
   notes: String
   postedToStock: Boolean!
-  createdAt: String!
-  updatedAt: String!
+  createdAt: Date!
+  updatedAt: Date!
 }
 
-
+"Input for each line item when creating a purchase (no lineTotal: we calculate it)"
 input PurchaseItemInput {
-  productId: ID!
-  variantId: ID
+  product: ID!
+  productName: String!
+  variant: ID!
+  variantName: String!
+  sku: String!
   quantity: Int!
   purchasePrice: Float!
   batchNo: String
-  expiryDate: String
+  expiryDate: Date
 }
 
+"Input for CreatePurchase mutation"
 input CreatePurchaseInput {
   supplierName: String!
   invoiceNo: String
   warehouseId: ID!
-  purchaseDate: String
+  purchaseDate: Date
   items: [PurchaseItemInput!]!
-  taxAmount: Float
+  taxAmount: Float = 0
   notes: String
 }
+
+"Filters for getting purchases"
+input PurchaseFilterInput {
+  supplierName: String
+  warehouseId: ID
+  status: String
+  dateFrom: Date
+  dateTo: Date
+  search: String  # e.g. invoiceNo, SKU, notes
+}
+
+"Paginated result for purchases"
+type PurchasePage {
+  data: [Purchase!]!
+  total: Int!
+  page: Int!
+  limit: Int!
+  totalPages: Int!
+}
+
+"Input for updating a purchase"
+input UpdatePurchaseItemInput {
+  product: ID!
+  productName: String!
+  variant: ID!
+  variantName: String!
+  sku: String!
+  quantity: Int!
+  purchasePrice: Float!
+  batchNo: String
+  expiryDate: Date
+}
+
+input UpdatePurchaseInput {
+  supplierName: String
+  invoiceNo: String
+  warehouseId: ID
+  purchaseDate: Date
+  status: String
+  items: [UpdatePurchaseItemInput!]
+  taxAmount: Float
+  notes: String
+  postedToStock: Boolean
+}
+
 
 `
 
