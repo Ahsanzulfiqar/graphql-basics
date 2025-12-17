@@ -31,6 +31,7 @@ import warehouseTypeDefs from "./graphql/typeDefs/warehouse.typeDefs.js";
 import productTypeDefs from "./graphql/typeDefs/product.typeDefs.js";
 import purchaseTypeDefs from "./graphql/typeDefs/purchase.typeDefs.js";
 
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

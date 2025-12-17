@@ -3,6 +3,12 @@ import PRODUCT from "../../models/Product.js";
 import PRODUCTVARIANT from "../../models/ProductVarient.js";
 import WAREHOUSE from "../../models/warehouse.js";
 import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
+import STOCK_LEDGER from "../../models/StockLedger.js";
+import { applyStockMovement } from "../../services/stock.helpers.js";
+
+
+
+
 import { ApolloError, UserInputError } from "apollo-server-express";
 import mongoose from "mongoose";
 
@@ -110,19 +116,7 @@ Query:{
 
 },
 
-  // Map populated Mongoose docs → GraphQL types (ProductBasic & ProductVariantBasic)
-//   PurchaseItem: {
-//     product: (parent) => {
-//       const p = parent.product;
-//       if (!p) return null;
-//       return { _id: p._id, name: p.name, sku: p.sku };
-//     },
-//     variant: (parent) => {
-//       const v = parent.variant;
-//       if (!v) return null;
-//       return { _id: v._id, name: v.name, sku: v.sku };
-//     },
-//   },
+
 
 
 
@@ -422,6 +416,217 @@ Query:{
     
   },
 
+    PostToStock: async (_, { purchaseId }) => {
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const purchase = await PURCHASE.findById(purchaseId)
+        .session(session)
+        .exec();
+
+      if (!purchase || purchase.isDeleted) {
+        throw new UserInputError("Purchase not found");
+      }
+
+      if (purchase.postedToStock) {
+        throw new UserInputError("Purchase already posted to stock");
+      }
+
+      const warehouse = await WAREHOUSE.findById(purchase.warehouse)
+        .session(session)
+        .exec();
+      if (!warehouse) {
+        throw new UserInputError("Warehouse not found for this purchase");
+      }
+
+      if (!purchase.items || purchase.items.length === 0) {
+        throw new UserInputError("Purchase has no items to post");
+      }
+
+      // Validate products & variants
+      const productIds = [
+        ...new Set(purchase.items.map((it) => it.product.toString())),
+      ];
+      const variantIds = [
+        ...new Set(purchase.items.map((it) => it.variant.toString())),
+      ];
+
+      const [products, variants] = await Promise.all([
+        PRODUCT.find({ _id: { $in: productIds } })
+          .select("_id")
+          .session(session),
+        PRODUCTVARIANT.find({ _id: { $in: variantIds } })
+          .select("_id")
+          .session(session),
+      ]);
+
+      const productSet = new Set(products.map((p) => p._id.toString()));
+      const variantSet = new Set(variants.map((v) => v._id.toString()));
+
+      const missingProducts = productIds.filter((id) => !productSet.has(id));
+      const missingVariants = variantIds.filter((id) => !variantSet.has(id));
+
+      if (missingProducts.length) {
+        throw new UserInputError(
+          `Products not found: ${missingProducts.join(", ")}`
+        );
+      }
+      if (missingVariants.length) {
+        throw new UserInputError(
+          `Variants not found: ${missingVariants.join(", ")}`
+        );
+      }
+
+      // Create ledger entries + update warehouseStock
+      const ledgerDocs = [];
+
+      for (const item of purchase.items) {
+        const qty = item.quantity;
+
+        // 1) Ledger row
+        ledgerDocs.push({
+          purchase: purchase._id,
+          product: item.product,
+          variant: item.variant,
+          warehouse: purchase.warehouse,
+          quantityIn: qty,
+          quantityOut: 0,
+          batchNo: item.batchNo,
+          expiryDate: item.expiryDate,
+          refType: "PURCHASE",
+          refNo: purchase.invoiceNo || String(purchase._id),
+          notes: "Posted from purchase",
+        });
+
+        // 2) warehouseStock update
+        await applyStockMovement(
+          {
+            warehouse: purchase.warehouse,
+            product: item.product,
+            variant: item.variant,
+            batchNo: item.batchNo,
+            expiryDate: item.expiryDate,
+            deltaQty: qty, // incoming stock
+          },
+          session
+        );
+      }
+
+      if (ledgerDocs.length > 0) {
+        await STOCK_LEDGER.insertMany(ledgerDocs, { session });
+      }
+
+      // Mark purchase as posted
+      purchase.postedToStock = true;
+      if (purchase.status === "draft") {
+        purchase.status = "received";
+      }
+
+      await purchase.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return purchase;
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("PostToStock error:", err);
+      throw new ApolloError(err.message || "Failed to post to stock");
+    }
+  },
+
+DeletePurchase: async (_, { id }) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const purchase = await PURCHASE.findById(id).session(session);
+
+      if (!purchase || purchase.isDeleted) {
+        // already gone / soft deleted
+        await session.commitTransaction();
+        session.endSession();
+        return true;
+      }
+
+      // If not posted to stock → just soft delete (no stock impact)
+      if (!purchase.postedToStock) {
+        purchase.isDeleted = true;
+        purchase.deletedAt = new Date();
+        purchase.status = "cancelled";
+        await purchase.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+        return true;
+      }
+
+      // If postedToStock → need to reverse stock
+      if (!purchase.items || purchase.items.length === 0) {
+        throw new UserInputError("Cannot rollback: purchase has no items");
+      }
+
+      // 1) Reverse stock movement & create ADJUSTMENT ledger rows
+      const reverseLedgerDocs = [];
+
+      for (const item of purchase.items) {
+        const qty = item.quantity;
+
+        // reverse stock: outgoing = qty
+        await applyStockMovement(
+          {
+            warehouse: purchase.warehouse,
+            product: item.product,
+            variant: item.variant,
+            batchNo: item.batchNo,
+            expiryDate: item.expiryDate,
+            deltaQty: -qty, // remove stock
+          },
+          session
+        );
+
+        reverseLedgerDocs.push({
+          purchase: purchase._id,
+          product: item.product,
+          variant: item.variant,
+          warehouse: purchase.warehouse,
+          quantityIn: 0,
+          quantityOut: qty,
+          batchNo: item.batchNo,
+          expiryDate: item.expiryDate,
+          refType: "ADJUSTMENT", // used as reversal
+          refNo: `REV-${purchase.invoiceNo || purchase._id}`,
+          notes: "Reversal of posted purchase on delete",
+        });
+      }
+
+      if (reverseLedgerDocs.length > 0) {
+        await STOCK_LEDGER.insertMany(reverseLedgerDocs, { session });
+      }
+
+      // 2) Soft delete purchase
+      purchase.isDeleted = true;
+      purchase.deletedAt = new Date();
+      purchase.status = "cancelled";
+      purchase.postedToStock = false;
+
+      await purchase.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+      return true;
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("DeletePurchase error:", err);
+      throw new ApolloError(err.message || "Failed to delete purchase");
+    }
+  },
+  
+  
 }
 };
 

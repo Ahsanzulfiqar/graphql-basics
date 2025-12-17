@@ -11,12 +11,14 @@ FilterPurchases(filter: PurchaseFilterInput, page: Int = 1, limit: Int = 20): Pu
           CreatePurchase(data: CreatePurchaseInput!): Purchase!
            ReceivePurchase(purchaseId: ID!): Purchase!
             UpdatePurchase(id: ID!, data: UpdatePurchaseInput!): Purchase!
+             DeletePurchase(id: ID!): Boolean!          # Soft delete, with optional rollback
+  PostToStock(purchaseId: ID!): Purchase!    # Creates ledger entries + updates wareHouseStock
   },
 
   type Subscription {
   newMessage: String!
   }
-  
+
 
 
 scalar Date

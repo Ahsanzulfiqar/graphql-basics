@@ -120,6 +120,17 @@ const purchaseSchema = new Schema(
       type: Boolean,
       default: false,
     },
+
+        // Soft delete
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+    },
+
   },
   { timestamps: true }
 );

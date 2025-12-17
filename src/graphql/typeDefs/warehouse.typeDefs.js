@@ -5,7 +5,9 @@ const warehouseTypeDefs  = gql`
     type Query {
      GetAllWarehouses: [warehouse!]!
      GetWarehouseById(_id: ID!): warehouse
-   
+     GetWarehouseStock(filter: WarehouseStockFilterInput page: Int = 1 limit: Int = 50): WarehouseStockPage!
+     GetWarehouseProductBatches(warehouseId: ID!, productId: ID!, variantId: ID): [WarehouseStockBatch!]!
+
     }
 
 
@@ -46,5 +48,42 @@ input UpdateWarehouseInput {
   city:String
   country:String
 }
+
+
+type WarehouseStockBatch {
+  batchNo: String
+  expiryDate: Date
+  quantity: Float
+}
+
+type WarehouseStock {
+  _id: ID!
+  warehouse: ID!
+  product: ID!
+  variant: ID
+  quantity: Float!
+  reserved: Float!
+  reorderLevel: Float!
+  batches: [WarehouseStockBatch!]!
+  createdAt: Date!
+  updatedAt: Date!
+}
+
+
+
+input WarehouseStockFilterInput {
+  warehouseId: ID
+  productId: ID
+  variantId: ID
+}
+
+type WarehouseStockPage {
+  data: [WarehouseStock!]!
+  total: Int!
+  page: Int!
+  limit: Int!
+  totalPages: Int!
+}
+
 `
 export default warehouseTypeDefs;

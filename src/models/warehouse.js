@@ -11,7 +11,6 @@ const warehouseSchema = new mongoose.Schema(
     country:{
       type: String,
        required: true,
-       unique:true
     },
     city:{
       type:String,
