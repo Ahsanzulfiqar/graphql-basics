@@ -50,7 +50,7 @@ const stockLedgerSchema = new Schema(
     // 🧾 Why this movement happened
     refType: {
       type: String,
-      enum: ["PURCHASE", "ADJUSTMENT", "SALE_RETURN", "OPENING"],
+      enum: ["PURCHASE", "SALE", "ADJUSTMENT", "SALE_RETURN", "OPENING"],
       default: "PURCHASE",
       index: true,
     },
