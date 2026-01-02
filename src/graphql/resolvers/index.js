@@ -2,6 +2,8 @@ import warehouseResolvers from "./warehouse.resolvers.js";
 import productResolver from "./product.resolver.js";
 import purchaseResolver from "./purchase.resolver.js";
 import sellerResolver from "./seller.resolver.js";
+import saleResolvers  from "./sale.resolver.js";
+
 
 
 
@@ -10,7 +12,8 @@ const resolvers = {
     ...warehouseResolvers.Query,
     ...productResolver.Query,
     ...purchaseResolver.Query,
-    ...sellerResolver.Query
+    ...sellerResolver.Query,
+    ...saleResolvers.Query
 
  
   
@@ -19,7 +22,9 @@ const resolvers = {
     ...warehouseResolvers.Mutation,
     ...productResolver.Mutation,
     ...purchaseResolver.Mutation,
-    ...sellerResolver.Mutation
+    ...sellerResolver.Mutation,
+    ...saleResolvers.Mutation,
+
  
   }
 };

@@ -7,20 +7,18 @@ const saleTypeDefs = gql `
   FilterSales(filter: SaleFilterInput, page: Int = 1, limit: Int = 20): SalePage!
   GetSaleById(id: ID!): Sale!
   GetSalesSummaryBySeller(sellerId: ID, dateFrom: Date, dateTo: Date): [SellerSalesSummary!]!
-}
+,}
 
 
  type Mutation {
   CreateSale(data: CreateSaleInput!): Sale!
-  ReserveSaleStock(saleId: ID!): Sale!
-  ShipSale(saleId: ID!): Sale!
+  ConfirmSale(saleId: ID!): Sale!
+  MarkOutForDelivery(saleId: ID!, data: OutForDeliveryInput!): Sale!
+  MarkDelivered(saleId: ID!): Sale!
   CancelSale(saleId: ID!): Boolean!
-  DeleteSale(id: ID!): Boolean!
-}
+  ReturnSale(saleId: ID!): Sale!
+},
 
-  type Subscription {
-  newMessage: String!
-  }
 
 scalar Date
 
@@ -43,14 +41,41 @@ type Sale {
   customerName: String
   customerPhone: String
   address: String
+
+  courierName: String
+  trackingNo: String
+  trackingUrl: String
+  deliveryNotes: String
+  shippedAt: Date
+
   status: String!
   items: [SaleItem!]!
+
   subTotal: Float!
   taxAmount: Float!
   totalAmount: Float!
-  notes: String
+
+  statusTimestamps: SaleStatusTimestamps
+  statusHistory: [SaleStatusHistory!]!
+
   createdAt: Date!
   updatedAt: Date!
+}
+
+type SaleStatusTimestamps {
+  draftAt: Date
+  confirmedAt: Date
+  outForDeliveryAt: Date
+  deliveredAt: Date
+  cancelledAt: Date
+  returnedAt: Date
+}
+
+type SaleStatusHistory {
+  status: String!
+  at: Date!
+  by: ID
+  note: String
 }
 
 input SaleItemInput {
@@ -75,6 +100,14 @@ input CreateSaleInput {
   notes: String
 }
 
+input OutForDeliveryInput {
+  courierName: String!
+  trackingNo: String!
+  trackingUrl: String
+  deliveryNotes: String
+  shippedAt: Date
+}
+
 input SaleFilterInput {
   sellerId: ID
   warehouseId: ID
@@ -92,14 +125,11 @@ type SalePage {
   totalPages: Int!
 }
 
-
-
 type SellerSalesSummary {
   seller: ID!
   totalSales: Float!
   totalOrders: Int!
 }
-
 `
 
 export default saleTypeDefs;
