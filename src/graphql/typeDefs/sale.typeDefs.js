@@ -6,6 +6,7 @@ const saleTypeDefs = gql `
  type Query {
   FilterSales(filter: SaleFilterInput, page: Int = 1, limit: Int = 20): SalePage!
   GetSaleById(id: ID!): Sale!
+  GetAllSales(page: Int = 1, limit: Int = 20): SalePage!
   GetSalesSummaryBySeller(sellerId: ID, dateFrom: Date, dateTo: Date): [SellerSalesSummary!]!
 ,}
 
@@ -62,6 +63,15 @@ type Sale {
   updatedAt: Date!
 }
 
+type SalePage {
+  data: [Sale!]!
+  total: Int!
+  page: Int!
+  limit: Int!
+  totalPages: Int!
+}
+
+
 type SaleStatusTimestamps {
   draftAt: Date
   confirmedAt: Date
@@ -117,13 +127,7 @@ input SaleFilterInput {
   search: String
 }
 
-type SalePage {
-  data: [Sale!]!
-  total: Int!
-  page: Int!
-  limit: Int!
-  totalPages: Int!
-}
+
 
 type SellerSalesSummary {
   seller: ID!

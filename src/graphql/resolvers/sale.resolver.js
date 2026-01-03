@@ -8,6 +8,7 @@ import PRODUCT_VARIANT from "../../models/ProductVarient.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
 import { reserveStock, releaseReservedStock,addBackToBatch } from "../../services/stock.helpers.js";
 import { fifoConsume } from "../../services/fifoConsume.js";
+import Sale from "../../models/Sale.js";
 
 
 
@@ -51,15 +52,15 @@ function pushHistory(sale, { status, by, note }) {
       const skip = (Math.max(page, 1) - 1) * Math.max(limit, 1);
 
       const [total, data] = await Promise.all([
-        Sale.countDocuments(q),
-        Sale.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit),
+        SALE.countDocuments(q),
+        SALE.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit),
       ]);
 
       return { data, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
     },
 
     GetSaleById: async (_, { id }) => {
-      const sale = await Sale.findOne({ _id: id, isDeleted: { $ne: true } });
+      const sale = await SALE.findOne({ _id: id, isDeleted: { $ne: true } });
       if (!sale) throw new UserInputError("Sale not found");
       return sale;
     },
@@ -78,7 +79,7 @@ function pushHistory(sale, { status, by, note }) {
         }
       }
 
-      const rows = await Sale.aggregate([
+      const rows = await SALE.aggregate([
         { $match: match },
         {
           $group: {
@@ -99,6 +100,37 @@ function pushHistory(sale, { status, by, note }) {
 
       return rows;
     },
+
+        GetAllSales: async (_, { page = 1, limit = 20 }) => {
+      try {
+        const safePage = Math.max(page, 1);
+        const safeLimit = Math.max(limit, 1);
+        const skip = (safePage - 1) * safeLimit;
+
+        const query = { isDeleted: { $ne: true } };
+
+        const [total, data] = await Promise.all([
+          SALE.countDocuments(query),
+          SALE.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(safeLimit),
+        ]);
+
+        return {
+          data,
+          total,
+          page: safePage,
+          limit: safeLimit,
+          totalPages: Math.ceil(total / safeLimit) || 1,
+        };
+      } catch (err) {
+        console.log(err,"err")
+        throw new ApolloError("Failed to fetch sales");
+      }
+    },
+
+    
   },
 
   Mutation: {
