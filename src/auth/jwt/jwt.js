@@ -1,5 +1,5 @@
-import pkg from 'jsonwebtoken';
-const { sign, verify } = pkg;
+import jwt from "jsonwebtoken";
+
 import { SECRET } from ".././../utils/config.js";
 import {
   ValidationError,
@@ -17,48 +17,28 @@ import {
 // * resetPassword
 
 const common = {
-  accessToken: {
-    secret: SECRET,
-    signOptions: {
-      expiresIn: "7d",
-    },
-  },
-  refreshToken: {
-    secret: SECRET,
-    signOptions: {
-      expiresIn: "1d",
-    },
-  },
-  emailToken: {
-    secret: SECRET,
-    signOptions: {
-      expiresIn: "1h",
-    },
-  },
-  resetPassword: {
-    secret: SECRET,
-    signOptions: {
-      expiresIn: "1h",
-    },
-  },
+  accessToken: { secret: SECRET, signOptions: { expiresIn: "7d" } },
+  refreshToken: { secret: SECRET, signOptions: { expiresIn: "1d" } },
+  emailToken: { secret: SECRET, signOptions: { expiresIn: "1h" } },
+  resetPassword: { secret: SECRET, signOptions: { expiresIn: "1h" } }
 };
 
-const generateToken = async (type, user, loginUser) => {
-  return await sign(
-    {
-      user: user,
-      currentLogin: loginUser,
-      type: type,
-    },
-    common[type].secret,
-    {
-      expiresIn: common[type].signOptions.expiresIn, // 15m
-    }
-  );
+
+export const generateToken = (type, payload) => {
+  const cfg = common[type];
+
+  if (!cfg) {
+    throw new Error(
+      `Invalid token type "${type}". Use one of: ${Object.keys(common).join(", ")}`
+    );
+  }
+
+  return jwt.sign({ ...payload, type }, cfg.secret, cfg.signOptions);
 };
 
-const verifyToken = async (token) => {
-  const data = await verify(token, SECRET, async (err, data) => {
+ export const verifyToken = async (token) => {
+
+  const data = await jwt.verify(token, SECRET, async (err, data) => {
     if (err) {
       console.log(err, "verifyToken Error");
       throw new AuthenticationError(
@@ -68,12 +48,6 @@ const verifyToken = async (token) => {
     return data;
   });
 
-  if (data.type === "emailToken") {
-    return data.user;
-  }
-  if (data.user && !data.user.isVerified) {
-    throw new ForbiddenError("Please verify your email.");
-  }
-  return data.user;
+  return data;
 };
-export { generateToken, verifyToken };
+

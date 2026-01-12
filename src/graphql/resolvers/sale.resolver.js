@@ -8,8 +8,8 @@ import PRODUCT_VARIANT from "../../models/ProductVarient.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
 import { reserveStock, releaseReservedStock,addBackToBatch } from "../../services/stock.helpers.js";
 import { fifoConsume } from "../../services/fifoConsume.js";
-import Sale from "../../models/Sale.js";
 
+import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
 
 
 function pushHistory(sale, { status, by, note }) {
@@ -134,7 +134,11 @@ function pushHistory(sale, { status, by, note }) {
   },
 
   Mutation: {
-     CreateSale: async (_, { data }, context) => {
+     CreateSale: async (_, { data }, ctx) => {
+
+      // requireRoles(ctx, ["SELLER", "SALES", "ADMIN", "MANAGER"]);
+ 
+
       const session = await mongoose.startSession();
       session.startTransaction();
       try {

@@ -9,6 +9,7 @@ import { applyStockMovement } from "../../services/stock.helpers.js";
 
 
 
+import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
 import { ApolloError, UserInputError } from "apollo-server-express";
 import mongoose from "mongoose";
 
@@ -21,7 +22,7 @@ const purchaseResolvers = {
 
 Query:{
 
-     GetAllPurchases: async () => {
+    GetAllPurchases: async () => {
       try {
         const purchases = await PURCHASE.find().sort({ createdAt: -1 });
         return purchases;
@@ -121,7 +122,11 @@ Query:{
 
 
   Mutation: {
-     CreatePurchase: async (_, { data }) => {
+     CreatePurchase: async (_, { data }, ctx) => {
+
+      //  requireRoles(ctx, ["ADMIN", "MANAGER"]);
+      //  await ensureWarehouseExists(data.warehouse);
+
       if (!data.items || data.items.length === 0) {
         throw new UserInputError("At least one purchase item is required.");
       }
@@ -234,13 +239,17 @@ Query:{
     },
 
 
-    ReceivePurchase: async (_, { purchaseId }) => {
+    ReceivePurchase: async (_, { purchaseId },ctx) => {
+      // requireRoles(ctx, ["WAREHOUSE", "ADMIN"]);
       // 1) Load purchase
       const purchase = await PURCHASE.findById(purchaseId);
 
       if (!purchase) {
         throw new Error("Purchase not found");
       }
+
+    //  await requireWarehouseAccess(ctx, purchase.warehouse);
+
 
       if (purchase.postedToStock) {
         throw new Error("This purchase is already posted to stock");

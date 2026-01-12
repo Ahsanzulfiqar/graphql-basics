@@ -21,7 +21,7 @@ import {connectToDB} from "./utils/db.js";
 import {PORT} from "./utils/config.js";
 
 
-import { generateToken, verifyToken } from "./auth/jwt/jwt.js";
+import  {verifyToken}  from "./auth/jwt/jwt.js";
 
 // * importing resolvers and typeDefs
 import resolvers from "./graphql/resolvers/index.js";
@@ -32,6 +32,10 @@ import productTypeDefs from "./graphql/typeDefs/product.typeDefs.js";
 import purchaseTypeDefs from "./graphql/typeDefs/purchase.typeDefs.js";
 import sellerTypeDefs from "./graphql/typeDefs/seller.typeDefs.js";
 import saleTypeDefs from "./graphql/typeDefs/sale.typeDefs.js";
+import userTypeDefs from "./graphql/typeDefs/user.typeDefs.js";
+import projectTypeDefs from "./graphql/typeDefs/project.typeDefs.js";
+
+
 
 
 
@@ -45,7 +49,7 @@ connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({
-  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs,sellerTypeDefs,saleTypeDefs],
+  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs,sellerTypeDefs,saleTypeDefs,userTypeDefs,projectTypeDefs],
   resolvers,
 });
 // ...
@@ -109,15 +113,17 @@ const server = new ApolloServer({
   context: async ({ req }) => {
     let currentUser;
     let token;
+    // console.log(req.headers.authorization,"Token")
     if (req.headers.authorization) {
       token = req.headers.authorization;
-      currentUser = await verifyToken(token, "accessToken");
+      currentUser = await verifyToken(token);
+      // console.log(currentUser,"currentUser")
       return {
         user: currentUser,
-        pubsub: pubsub,
+      
       };
     }
-    return pubsub;
+    
   },
 });
 const main = async () => {
