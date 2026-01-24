@@ -12,8 +12,9 @@ const productSchema = new Schema(
     },
     brand: {
       type: String,
-      required: true,
+      required: false,
     },
+  
     sku: {
       type: String,
       required: true,

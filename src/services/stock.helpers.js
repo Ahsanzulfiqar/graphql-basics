@@ -6,54 +6,49 @@ import mongoose from "mongoose";
  * deltaQty = +N (incoming) or -N (outgoing).
  */
 export async function applyStockMovement(
-  {
-    warehouse,
-    product,
-    variant,
-    batchNo,
-    expiryDate,
-    deltaQty,
-  },
+  { warehouse, product, variant, batchNo, expiryDate, deltaQty },
   session
 ) {
   if (!deltaQty || deltaQty === 0) return;
 
-  const query = {
-    warehouse: new mongoose.Types.ObjectId(warehouse),
-    product: new mongoose.Types.ObjectId(product),
-  };
+  const warehouseId = new mongoose.Types.ObjectId(warehouse);
+  const productId = new mongoose.Types.ObjectId(product);
 
+  const query = { warehouse: warehouseId, product: productId };
+
+  // ✅ variant optional
   if (variant) query.variant = new mongoose.Types.ObjectId(variant);
 
   const stock = await WAREHOUSE_STOCK.findOne(query).session(session);
 
+  // normalize expiryDate for safe compare
+  const exp = expiryDate ? new Date(expiryDate) : null;
+  const expKey = exp ? exp.toISOString().slice(0, 10) : ""; // YYYY-MM-DD
+
   if (!stock) {
-    // Only create if incoming > 0
     if (deltaQty < 0) {
       throw new Error("Cannot reduce stock: record does not exist");
     }
 
-    const doc = await WAREHOUSE_STOCK.create(
-      [
-        {
-          warehouse,
-          product,
-          variant,
-          quantity: deltaQty,
-          batches: batchNo
-            ? [
-                {
-                  batchNo,
-                  expiryDate: expiryDate ? new Date(expiryDate) : undefined,
-                  quantity: deltaQty,
-                },
-              ]
-            : [],
-        },
-      ],
-      { session }
-    );
+    // ✅ build create payload safely
+    const payload = {
+      warehouse: warehouseId,
+      product: productId,
+      quantity: deltaQty,
+      batches: [],
+    };
 
+    if (variant) payload.variant = new mongoose.Types.ObjectId(variant);
+
+    if (batchNo) {
+      payload.batches.push({
+        batchNo,
+        expiryDate: exp || undefined,
+        quantity: deltaQty,
+      });
+    }
+
+    const doc = await WAREHOUSE_STOCK.create([payload], { session });
     return doc[0];
   }
 
@@ -65,29 +60,25 @@ export async function applyStockMovement(
 
   // adjust batches if batch specified
   if (batchNo) {
-    const existingBatch = stock.batches.find(
-      (b) =>
-        b.batchNo === batchNo &&
-        String(b.expiryDate || "") === String(expiryDate || "")
-    );
+    const existingBatch = stock.batches.find((b) => {
+      const bKey = b.expiryDate ? new Date(b.expiryDate).toISOString().slice(0, 10) : "";
+      return b.batchNo === batchNo && bKey === expKey;
+    });
 
     if (existingBatch) {
       existingBatch.quantity += deltaQty;
       if (existingBatch.quantity < 0) {
         throw new Error("Resulting batch stock would be negative");
       }
-      // optionally remove empty batch:
       stock.batches = stock.batches.filter((b) => b.quantity > 0);
     } else if (deltaQty > 0) {
       stock.batches.push({
         batchNo,
-        expiryDate: expiryDate ? new Date(expiryDate) : undefined,
+        expiryDate: exp || undefined,
         quantity: deltaQty,
       });
     } else {
-      throw new Error(
-        `Cannot reduce stock for missing batch ${batchNo} (no existing batch)`
-      );
+      throw new Error(`Cannot reduce stock for missing batch ${batchNo}`);
     }
   }
 

@@ -8,7 +8,7 @@ dotenv.config();
 
 
 const NODE_ENV = process.env.NODE_ENV || "development";
-const PORT = process.env.PORT || 6000;
+const PORT = process.env.PORT || 4000;
 const Mongo_URI = `mongodb+srv://ahsanzulfiqar:Ahsan123@nooraerp.ror8ksw.mongodb.net/${dbName}?retryWrites=true&w=majority`;
 const MONGO_URL = process.env.MONGO_URL || Mongo_URI
 

@@ -19,7 +19,7 @@ const stockLedgerSchema = new Schema(
     variant: {
       type: Schema.Types.ObjectId,
       ref: "productVarient", // keep same as your purchase item ref
-      required: true,
+      required: false,
     },
     warehouse: {
       type: Schema.Types.ObjectId,

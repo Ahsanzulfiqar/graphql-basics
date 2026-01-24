@@ -155,6 +155,7 @@ const productResolvers = {
         if (err.code === 11000) {
           throw new Error("SKU already exists");
         }
+        console.log(err)
         throw new Error("Failed to create product variant");
       }
     },

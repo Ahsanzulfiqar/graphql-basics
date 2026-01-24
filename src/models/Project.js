@@ -21,7 +21,7 @@ const projectSchema = new Schema(
     warehouses: [
       {
         type: Schema.Types.ObjectId,
-        ref: "Warehouse",
+        ref: "warehouse",
         required: true,
       },
     ],

@@ -18,11 +18,11 @@ const purchaseItemSchema = new Schema(
     variant: {
       type: Schema.Types.ObjectId,
       ref: "productVarient",
-      required:true,
+      required:false,
     },
     variantName:{
       type: String,
-      required: true,
+      required: false,
     },
     
  sku:{
