@@ -17,7 +17,7 @@ const productTypeDefs =  gql`
         
     CreateProduct( data: CreateProductInput!): Product!
     UpdateProduct(_id: ID!, data: UpdateProductInput!): Product!
-   CreateProductVariant(data: CreateProductVariantInput!): ProductVariant!
+    CreateProductVariant(data: CreateProductVariantInput!): ProductVariant!
     UpdateProductVariant(_id: ID!, data: UpdateProductVariantInput!): ProductVariant!
 
     #  UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
@@ -50,7 +50,7 @@ type ProductVariant {
   purchasePrice: Float!
   salePrice: Float!
   attributes: [ProductVariantAttribute!]
-  packSize: Int!
+  packSize: String
   netWeight: String!
   isActive: Boolean!
   images: [ProductImage!]
@@ -132,7 +132,7 @@ input CreateProductVariantInput {
   purchasePrice: Float
   salePrice: Float
   attributes: [ProductVariantAttributeInput!]
-  packSize: Int
+  packSize: String
   netWeight: String
   isActive: Boolean
   images: [ProductImageInput!]
@@ -146,7 +146,7 @@ input UpdateProductVariantInput {
   purchasePrice: Float
   salePrice: Float
   attributes: [ProductVariantAttributeInput!]
-  packSize: Int
+  packSize: String
   netWeight: String
   isActive: Boolean
   images: [ProductImageInput!]
@@ -161,7 +161,7 @@ input CreateProductVariantInlineInput {
   purchasePrice: Float
   salePrice: Float
   attributes: [ProductVariantAttributeInput!]
-  packSize: Int
+  packSize: String
   netWeight: String
   isActive: Boolean
   images: [ProductImageInput!]

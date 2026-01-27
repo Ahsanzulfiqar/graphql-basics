@@ -12,6 +12,7 @@ import { fifoConsume } from "../../services/fifoConsume.js";
 import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
 
 
+
 function pushHistory(sale, { status, by, note }) {
   sale.statusHistory = sale.statusHistory || [];
   sale.statusHistory.push({ status, at: new Date(), by, note });
@@ -137,7 +138,7 @@ function pushHistory(sale, { status, by, note }) {
      CreateSale: async (_, { data }, ctx) => {
 
       // requireRoles(ctx, ["SELLER", "SALES", "ADMIN", "MANAGER"]);
- 
+   console.log("in")
 
       const session = await mongoose.startSession();
       session.startTransaction();
@@ -216,7 +217,7 @@ function pushHistory(sale, { status, by, note }) {
               notes: data.notes,
               statusTimestamps: { draftAt: new Date() },
               statusHistory: [
-                { status: "draft", at: new Date(), by: context?.user?._id, note: "Sale created" },
+                { status: "draft", at: new Date(), by: ctx?.user?._id, note: "Sale created" },
               ],
             },
           ],

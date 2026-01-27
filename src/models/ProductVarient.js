@@ -44,7 +44,7 @@ const productSchema = new Schema(
     ],
 
        packSize: {
-      type: Number,
+      type: String,
     },
     netWeight: {
       type: String,
