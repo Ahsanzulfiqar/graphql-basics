@@ -21,6 +21,10 @@ const productSchema = new Schema(
       unique: true,   // <- unique
       trim: true,
     },
+    barcode: {
+      type:String,
+      
+    },
     category:{
        type: String,
       required: true,
