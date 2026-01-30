@@ -157,6 +157,30 @@ const saleSchema = new Schema(
     // Soft delete
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },
+
+    payment: {
+  status: {
+    type: String,
+    enum: ["unpaid", "paid"],
+    default: "unpaid",
+    index: true,
+  },
+  mode: {
+    type: String,
+    enum: ["COD", "ONLINE"],
+    default: "COD",
+    index: true,
+  },
+  bankAccount: {
+    type: String,
+    trim: true,
+  },
+  paidAt: {
+    type: Date,
+  },
+},
+
+
   },
   { timestamps: true }
 );
@@ -171,13 +195,26 @@ saleSchema.pre("save", function (next) {
   }
   next();
 });
+// Payment hook
+saleSchema.pre("save", function (next) {
+  if (!this.payment) {
+    this.payment = { status: "unpaid", mode: "COD" };
+  }
 
-/**
- * ✅ Unique trackingNo (optional but recommended)
- * Allows null/empty trackingNo but prevents duplicate real tracking numbers.
- * Uses partial index behavior in MongoDB to only enforce uniqueness when trackingNo is present.
- * See MongoDB docs on partial indexes for use of partialFilterExpression. :contentReference[oaicite:0]{index=0}
- */
+  if (this.payment.status === "paid" && this.payment.mode === "ONLINE") {
+    if (!this.payment.bankAccount || !this.payment.bankAccount.trim()) {
+      return next(
+        new Error("Bank account is required for ONLINE paid sales")
+      );
+    }
+  }
+
+  next();
+});
+
+
+
+
 saleSchema.index(
   { trackingNo: 1 },
   {

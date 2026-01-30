@@ -17,6 +17,11 @@ const warehouseTypeDefs  = gql`
 
     },
 
+
+
+
+
+
    type warehouse {
     _id: ID!
     name: String!
@@ -53,21 +58,25 @@ input UpdateWarehouseInput {
 type WarehouseStockBatch {
   batchNo: String
   expiryDate: Date
-  quantity: Float
+  quantity: Int
 }
 
 type WarehouseStock {
   _id: ID!
   warehouse: ID!
+  warehouseName: String
   product: ID!
+  productName: String
   variant: ID
-  quantity: Float!
-  reserved: Float!
-  reorderLevel: Float!
+  variantName: String
+  quantity: Int!
+  reserved: Int!
+  reorderLevel: Int!
   batches: [WarehouseStockBatch!]!
   createdAt: Date!
   updatedAt: Date!
 }
+
 
 
 

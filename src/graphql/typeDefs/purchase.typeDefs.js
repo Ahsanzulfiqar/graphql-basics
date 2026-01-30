@@ -26,6 +26,7 @@ const purchaseTypeDefs = gql`
     DeletePurchase(id: ID!): Boolean!
 
     PostToStock(purchaseId: ID!): Purchase!
+    AddManualStock(data: ManualStockInput!): WarehouseStock!
   }
 
   type Subscription {
@@ -34,7 +35,7 @@ const purchaseTypeDefs = gql`
 
   type PurchaseItem {
     product: ID!
-    productName: String!
+    productName: String
     variant: ID
     variantName: String
     sku: String!
@@ -44,23 +45,48 @@ const purchaseTypeDefs = gql`
     batchNo: String
     expiryDate: Date
   }
+input ManualStockInput {
+  warehouseId: ID!
+  productId: ID!
+  variantId: ID
+  quantity: Int!
+  batchNo: String
+  expiryDate: Date
+  note: String
+}
 
-  type Purchase {
-    _id: ID!
-    supplierName: String!
-    invoiceNo: String
-    warehouse: ID!
-    purchaseDate: Date!
-    status: PurchaseStatus!
-    items: [PurchaseItem!]!
-    subTotal: Float!
-    taxAmount: Float!
-    totalAmount: Float!
-    notes: String
-    postedToStock: Boolean!
-    createdAt: Date!
-    updatedAt: Date!
-  }
+
+type WarehouseStock {
+  _id: ID!
+  warehouse: ID!
+  product: ID!
+  variant: ID
+  quantity: Int!
+  reserved: Int!
+  reorderLevel: Int
+  batches: [WarehouseStockBatch!]
+}
+
+
+
+ type Purchase {
+  _id: ID!
+  supplierName: String!
+  invoiceNo: String
+  warehouse: ID!
+  warehouseName: String   # ✅ ADD THIS
+  purchaseDate: Date!
+  status: PurchaseStatus!
+  items: [PurchaseItem!]!
+  subTotal: Float!
+  taxAmount: Float!
+  totalAmount: Float!
+  notes: String
+  postedToStock: Boolean!
+  createdAt: Date!
+  updatedAt: Date!
+}
+
 
   input PurchaseItemInput {
     product: ID!

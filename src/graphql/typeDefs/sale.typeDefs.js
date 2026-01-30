@@ -18,6 +18,7 @@ const saleTypeDefs = gql `
   MarkDelivered(saleId: ID!): Sale!
   CancelSale(saleId: ID!): Boolean!
   ReturnSale(saleId: ID!): Sale!
+  MarkSalePaid(saleId: ID!, payment: PaymentInput!): Sale!
 },
 
 
@@ -61,6 +62,7 @@ type Sale {
 
   createdAt: Date!
   updatedAt: Date!
+   payment: PaymentInfo
 }
 
 type SalePage {
@@ -104,6 +106,9 @@ input CreateSaleInput {
   invoiceNo: String
   customerName: String
   customerPhone: String
+  # courierName: data.courierName,
+  # trackingNo: data.trackingNo,
+  # trackingUrl: data.trackingUrl,
   address: String
   items: [SaleItemInput!]!
   taxAmount: Float
@@ -134,6 +139,20 @@ type SellerSalesSummary {
   totalSales: Float!
   totalOrders: Int!
 }
+
+type PaymentInfo {
+  status: String!
+  mode: String
+  bankAccount: String
+  paidAt: Date
+}
+
+input PaymentInput {
+  status: String # unpaid | paid
+  mode: String   # COD | ONLINE
+  bankAccount: String
+}
+
 `
 
 export default saleTypeDefs;

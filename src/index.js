@@ -19,8 +19,6 @@ const pubsub = new PubSub();
 
 import {connectToDB} from "./utils/db.js";
 import {PORT} from "./utils/config.js";
-
-
 import  {verifyToken}  from "./auth/jwt/jwt.js";
 
 // * importing resolvers and typeDefs
@@ -34,6 +32,8 @@ import sellerTypeDefs from "./graphql/typeDefs/seller.typeDefs.js";
 import saleTypeDefs from "./graphql/typeDefs/sale.typeDefs.js";
 import userTypeDefs from "./graphql/typeDefs/user.typeDefs.js";
 import projectTypeDefs from "./graphql/typeDefs/project.typeDefs.js";
+import categoryTypeDefs from "./graphql/typeDefs/category.typeDefs.js"
+
 
 
 
@@ -49,7 +49,7 @@ connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({
-  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs,sellerTypeDefs,saleTypeDefs,userTypeDefs,projectTypeDefs],
+  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs,sellerTypeDefs,saleTypeDefs,userTypeDefs,projectTypeDefs,categoryTypeDefs],
   resolvers,
 });
 // ...

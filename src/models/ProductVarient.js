@@ -69,7 +69,9 @@ const productSchema = new Schema(
   }
 );
 
-export default model("productVarient",productSchema)
+// ProductVariant model file
+export default mongoose.model("productVariant", productSchema, "productvarients");
+
 
 
 

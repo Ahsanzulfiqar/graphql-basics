@@ -44,7 +44,7 @@ const productResolvers = {
       }
     },
 
-      GetVariantById: async (_, { _id }) => {
+    GetVariantById: async (_, { _id }) => {
       try {
         const variant = await PRODUCTVARIANT.findById(_id);
         if(variant)
@@ -202,6 +202,11 @@ const productResolvers = {
       }
     },
   
+
+
+
+
+    
 
 
   

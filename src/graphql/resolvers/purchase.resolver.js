@@ -20,6 +20,8 @@ import mongoose from "mongoose";
 const purchaseResolvers = {
 
 
+
+
 Query:{
 
     GetAllPurchases: async () => {
@@ -32,22 +34,36 @@ Query:{
       }
     },
 
-   GetPurchaseById: async (_, { _id }) => {
-      try {
-
-      if (!_id || !mongoose.Types.ObjectId.isValid(_id)) {
+GetPurchaseById: async (_, { _id }) => {
+  try {
+    if (!_id || !mongoose.Types.ObjectId.isValid(_id)) {
       throw new UserInputError("Invalid purchase ID format");
-      }
-      const purchase = await PURCHASE.findById(_id);
-       if (!purchase) {
-      // 404-style error
+    }
+
+    const purchase = await PURCHASE.findById(_id)
+      .populate("warehouse", "_id name")
+      .lean();
+
+    if (!purchase) {
       throw new UserInputError("Purchase not found");
     }
-        return purchase;
-      } catch (err) {
+
+    return {
+      ...purchase,
+
+      // ✅ keep ID field as ID
+      warehouse: purchase.warehouse?._id
+        ? String(purchase.warehouse._id)
+        : String(purchase.warehouse),
+
+      // ✅ extra field
+      warehouseName: purchase.warehouse?.name || null,
+    };
+  } catch (err) {
     throw new ApolloError(err.message || "Failed to fetch purchase");
-      }
-    },
+  }
+},
+
 
     FilterPurchases: async (_, { filter = {}, page = 1, limit = 20 }) => {
     const query = {};
@@ -112,9 +128,6 @@ Query:{
       totalPages,
     };
   },
-
-
-
 },
 
 
@@ -488,7 +501,6 @@ PostToStock: async (_, { purchaseId }) => {
       const variants = await PRODUCTVARIANT.find({ _id: { $in: variantIds } })
         .select("_id")
         .session(session);
-
       const variantSet = new Set(variants.map((v) => v._id.toString()));
       const missingVariants = variantIds.filter((id) => !variantSet.has(id));
       if (missingVariants.length) throw new UserInputError(`Variants not found: ${missingVariants.join(", ")}`);
@@ -541,7 +553,13 @@ PostToStock: async (_, { purchaseId }) => {
 
     await session.commitTransaction();
     session.endSession();
-    return purchase;
+
+    return {
+  ...purchase.toObject(),
+  warehouse: String(purchase.warehouse),
+  warehouseName: warehouse?.name || null,
+};
+    // return purchase;
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -714,6 +732,125 @@ DeletePurchase: async (_, { id }, ctx) => {
 },
 
   
+AddManualStock: async (_, { data }, ctx) => {
+
+  if (!ctx.user) throw new AuthenticationError("Login required");
+  if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
+    throw new ForbiddenError("User Not allowed to add manual stock");
+  }
+
+  const {
+    warehouseId,
+    productId,
+    variantId,
+    quantity,
+    batchNo,
+    expiryDate,
+    note,
+  } = data;
+
+  if (quantity <= 0) {
+    throw new UserInputError("Quantity must be greater than 0");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Validate warehouse
+    const warehouse = await WAREHOUSE.findById(warehouseId).session(session);
+    if (!warehouse) throw new UserInputError("Warehouse not found");
+
+    // Validate product
+    const product = await PRODUCT.findById(productId).session(session);
+    if (!product) throw new UserInputError("Product not found");
+
+    // Validate variant (if provided)
+    if (variantId) {
+
+      const variant = await PRODUCTVARIANT.findById(variantId).session(session);
+      if (!variant) throw new UserInputError("Variant not found");
+      if (String(variant.product) !== String(productId)) {
+        throw new UserInputError("Variant does not belong to product");
+      }
+    }
+
+    // Build query
+    const query = {
+      warehouse: warehouseId,
+      product: productId,
+    };
+    if (variantId) query.variant = variantId;
+
+    let stock = await WAREHOUSE_STOCK.findOne(query).session(session);
+
+    // Create stock record if missing
+    if (!stock) {
+      stock = new WAREHOUSE_STOCK({
+        warehouse: warehouseId,
+        product: productId,
+        variant: variantId,
+        quantity: 0,
+        reserved: 0,
+        batches: [],
+      });
+    }
+
+    // Increase main quantity
+    stock.quantity += quantity;
+
+    // Handle batches
+    if (batchNo) {
+      const existingBatch = stock.batches.find(
+        (b) =>
+          b.batchNo === batchNo &&
+          String(b.expiryDate || "") === String(expiryDate || "")
+      );
+
+      if (existingBatch) {
+        existingBatch.quantity += quantity;
+      } else {
+        stock.batches.push({
+          batchNo,
+          expiryDate: expiryDate ? new Date(expiryDate) : undefined,
+          quantity,
+        });
+      }
+    }
+
+    await stock.save({ session });
+
+    // 📒 Ledger entry
+    await STOCK_LEDGER.create(
+      [
+        {
+          warehouse: warehouseId,
+          product: productId,
+          variant: variantId,
+          quantityIn: quantity,
+          quantityOut: 0,
+          batchNo,
+          expiryDate,
+          refType: "ADJUSTMENT",
+          refNo: `MAN-${Date.now()}`,
+          notes: note || "Manual stock addition",
+          createdBy: ctx.user._id,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return stock;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    throw new ApolloError(err.message || "Failed to add manual stock");
+  }
+},
+
   
 }
 };
