@@ -23,14 +23,16 @@ const productSchema = new Schema(
     },
     barcode: {
       type:String,
-      
+
     },
     category:{
+      type: Schema.Types.ObjectId, ref: "category",
        type: String,
       required: true,
     },
     subCategory:{
-           type: String,
+      type: Schema.Types.ObjectId, ref: "subCategory",
+      type: String,
       required: true,
     },
 

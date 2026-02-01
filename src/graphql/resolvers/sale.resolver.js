@@ -238,7 +238,7 @@ function pushHistory(sale, { status, by, note }) {
     // },
 // CreateSale resolver (role-based status + optional-variant + reserve on confirmed)
 CreateSale: async (_, { data }, ctx) => {
-  if (!ctx.user) throw new AuthenticationError("Login required");
+  // if (!ctx.user) throw new AuthenticationError("Login required");
 
   const isAdminManager = ["ADMIN", "MANAGER"].includes(ctx.user.role);
   const isSellerSales = ["SELLER", "SALES"].includes(ctx.user.role);
