@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { ApolloError, UserInputError } from "apollo-server-express";
+import { ApolloError, UserInputError,AuthenticationError,ForbiddenError } from "apollo-server-express";
 import SALE from "../../models/Sale.js";
 import SELLER from "../../models/Seller.js";
 import WAREHOUSE from "../../models/warehouse.js";
@@ -8,7 +8,6 @@ import PRODUCT_VARIANT from "../../models/ProductVarient.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
 import { reserveStock, releaseReservedStock,addBackToBatch } from "../../services/stock.helpers.js";
 import { fifoConsume } from "../../services/fifoConsume.js";
-
 import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
 
 
@@ -238,7 +237,7 @@ function pushHistory(sale, { status, by, note }) {
     // },
 // CreateSale resolver (role-based status + optional-variant + reserve on confirmed)
 CreateSale: async (_, { data }, ctx) => {
-  // if (!ctx.user) throw new AuthenticationError("Login required");
+  if (!ctx.user) throw new AuthenticationError("Login required");
 
   const isAdminManager = ["ADMIN", "MANAGER"].includes(ctx.user.role);
   const isSellerSales = ["SELLER", "SALES"].includes(ctx.user.role);
