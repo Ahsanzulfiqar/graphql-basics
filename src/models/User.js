@@ -41,7 +41,7 @@ const userSchema = new Schema(
     assignedProjects: [
       {
         type: Schema.Types.ObjectId,
-        ref: "Project",
+        ref: "project",
       },
     ],
 
@@ -49,7 +49,7 @@ const userSchema = new Schema(
     assignedWarehouses: [
       {
         type: Schema.Types.ObjectId,
-        ref: "Warehouse",
+        ref: "warehouse",
       },
     ],
 

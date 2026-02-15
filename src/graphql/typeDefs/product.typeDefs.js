@@ -39,6 +39,9 @@ type Product {
   images: [ProductImage]!
   createdAt: String
   updatedAt: String
+   # ✅ NEW computed fields
+  categoryInfo: CategoryBasic
+  subCategoryInfo: SubCategoryBasic
 }
 
 type ProductVariant {
@@ -166,6 +169,17 @@ input CreateProductVariantInlineInput {
   isActive: Boolean
   images: [ProductImageInput!]
 }
+
+type CategoryBasic {
+  _id: ID!
+  name: String!
+}
+
+type SubCategoryBasic {
+  _id: ID!
+  name: String!
+}
+
 
 
 `

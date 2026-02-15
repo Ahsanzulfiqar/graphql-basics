@@ -22,6 +22,16 @@ const userTypeDefs = gql `
     ChangeMyPassword(oldPassword: String!, newPassword: String!): String!
   }
 
+type ProjectBasic {
+  _id: ID!
+  name: String!
+}
+
+type WarehouseBasic {
+  _id: ID!
+  name: String!
+}
+
 
  type User {
     _id: ID!
@@ -34,6 +44,10 @@ const userTypeDefs = gql `
     isActive: Boolean!
     createdAt: String
     updatedAt: String
+      # ✅ NEW computed fields
+  assignedProjectDetails: [ProjectBasic!]!
+  assignedWarehouseDetails: [WarehouseBasic!]!
+  
   }
 
   type AuthPayload {

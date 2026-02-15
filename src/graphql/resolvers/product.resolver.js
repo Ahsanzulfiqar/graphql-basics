@@ -1,13 +1,31 @@
-
-
+import { UserInputError, ApolloError } from "apollo-server-express";
 import validator from "validator";
 import PRODUCT from "../../models/Product.js";
 import PRODUCTVARIANT from "../../models/ProductVarient.js";
+import SUBCATEGORY from "../../models/SubCategory.js";
+import CATEGORY from "../../models/Category.js";
+import mongoose from "mongoose";
 
 
 
 
 const productResolvers = {
+
+    Product: {
+    categoryInfo: async (product) => {
+      if (!product?.category) return null;
+      const cat = await CATEGORY.findById(product.category).select("_id name").lean();
+      return cat ? { _id: cat._id, name: cat.name } : null;
+    },
+
+    subCategoryInfo: async (product) => {
+      if (!product?.subCategory) return null;
+      const sub = await SUBCATEGORY.findById(product.subCategory).select("_id name").lean();
+      return sub ? { _id: sub._id, name: sub.name } : null;
+    },
+  },
+
+
   Query: {
     
      // ✅ Get all products
@@ -21,18 +39,34 @@ const productResolvers = {
       }
     },
       // ✅ Get single product by Mongo _id
-    GetProductById: async (_, { _id }) => {
-      try {
-        const product = await PRODUCT.findById(_id);
-        if (!product) {
-          throw new Error("Product not found");
-        }
-        return product;
-      } catch (error) {
-        console.error("Error fetching product:", error);
-        throw new Error("Failed to get product");
-      }
-    },
+  GetProductById: async (_, { _id }) => {
+  try {
+    // ✅ Validate ID format
+    if (!_id || !mongoose.Types.ObjectId.isValid(_id)) {
+      throw new UserInputError("Invalid product ID format");
+    }
+
+    // ✅ Fetch product
+    const product = await PRODUCT.findById(_id);
+
+    if (!product) {
+      throw new UserInputError("Product not found");
+    }
+
+    return product;
+
+  } catch (error) {
+    console.error("GetProductById error:", error);
+
+    // If it's already a GraphQL-friendly error, throw it directly
+    if (error instanceof UserInputError) {
+      throw error;
+    }
+
+    // Otherwise return generic server error
+    throw new ApolloError("Failed to fetch product");
+  }
+  },
 
   GetVariantsByProduct: async (_, { productId }) => {
       try {

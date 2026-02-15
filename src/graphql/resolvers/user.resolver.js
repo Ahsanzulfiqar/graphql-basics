@@ -33,6 +33,29 @@ const validateWarehouses = async (ids = []) => {
 const normalizeEmail = (email) => email.toLowerCase().trim();
 
 export default {
+
+    User: {
+    assignedProjectDetails: async (user) => {
+      if (!user.assignedProjects?.length) return [];
+
+      return PROJECT.find({
+        _id: { $in: user.assignedProjects },
+      })
+        .select("_id name")
+        .lean();
+    },
+
+    assignedWarehouseDetails: async (user) => {
+      if (!user.assignedWarehouses?.length) return [];
+
+      return WAREHOUSE.find({
+        _id: { $in: user.assignedWarehouses },
+      })
+        .select("_id name")
+        .lean();
+    },
+  },
+  
   Query: {
     Me: async (_, __, ctx) => ctx.user,
 
