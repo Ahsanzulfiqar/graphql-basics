@@ -24,6 +24,22 @@ const saleTypeDefs = gql `
 
 scalar Date
 
+
+  # ✅ Courier breakdown types
+  type CourierCharges {
+    baseCharge: Float
+    codCharge: Float
+    returnCharge: Float
+  }
+
+  type SaleCourier {
+    courierId: ID
+    courierName: String
+    charges: CourierCharges
+    trackingNo: String
+    trackingUrl: String
+  }
+
 type SaleItem {
   product: ID!
   variant: ID
@@ -42,11 +58,12 @@ type Sale {
   invoiceNo: String
   customerName: String
   customerPhone: String
+  country:String
+  city:String
   address: String
 
-  courierName: String
-  trackingNo: String
-  trackingUrl: String
+# ✅ New courier object
+  courier: SaleCourier
   deliveryNotes: String
   shippedAt: Date
 
@@ -109,19 +126,26 @@ input CreateSaleInput {
   # courierName: data.courierName,
   # trackingNo: data.trackingNo,
   # trackingUrl: data.trackingUrl,
+  country:String
+  city:String
   address: String
   items: [SaleItemInput!]!
   taxAmount: Float
   notes: String
 }
 
-input OutForDeliveryInput {
-  courierName: String!
-  trackingNo: String!
-  trackingUrl: String
-  deliveryNotes: String
-  shippedAt: Date
-}
+
+
+ # ✅ Updated OutForDelivery input to use courierId + optional COD logic
+  input OutForDeliveryInput {
+    courierId: ID!
+    trackingNo: String!
+    trackingUrl: String
+    deliveryNotes: String
+    shippedAt: Date
+    isCOD: Boolean
+  }
+
 
 input SaleFilterInput {
   sellerId: ID

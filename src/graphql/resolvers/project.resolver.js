@@ -2,18 +2,10 @@ import PROJECT from "../../models/Project.js";
 import WAREHOUSE from '../../models/warehouse.js';
 import USER from "../../models/User.js";
 import COURIER from "../../models/Courier.js";
-import { requireAuth } from "../../auth/permissions/permissions.js";
+import {  requireRoles  } from "../../auth/permissions/permissions.js";
 
-import { AuthenticationError, ForbiddenError, UserInputError } from "apollo-server-express";
+import { AuthenticationError, ForbiddenError, UserInputError ,ApolloError} from "apollo-server-express";
 
-import { ApolloError } from "apollo-server-express";
-
-
-const requireRoles = (ctx, roles) => {
-  if (!ctx.user) throw new AuthenticationError("Login required");
-
-  if (!roles.includes(ctx.user.role)) throw new ForbiddenError("Not allowed");
-};
 
 const validateWarehouses = async (warehouseIds) => {
   if (!warehouseIds || warehouseIds.length === 0) {
@@ -41,14 +33,50 @@ export default {
       return PROJECT.findById(_id);
     },
 
-        GetAllCouriers: async (_, __, ctx) => {
-      requireAuth(ctx);
-      return COURIER.find().sort({ name: 1 });
+    GetAllCouriers: async (_, __, ctx) => {
+      try {
+        // 🔐 Authentication required
+        if (!ctx.user) {
+          throw new AuthenticationError("Login required");
+        }
+
+        
+        requireRoles(ctx, ["ADMIN", "MANAGER", "SALES", "WAREHOUSE"]);
+
+        const couriers = await COURIER.find({ isActive: true }).sort({ name: 1 });
+
+        return couriers;
+      } catch (err) {
+        console.error("GetAllCouriers error:", err);
+        throw new ApolloError("Failed to fetch couriers");
+      }
     },
 
+      // ✅ Get Courier By ID
     GetCourierById: async (_, { _id }, ctx) => {
-      requireAuth(ctx);
-      return COURIER.findById(_id);
+      try {
+        // 🔐 Authentication required
+        if (!ctx.user) {
+          throw new AuthenticationError("Login required");
+        }
+         requireRoles(ctx, ["ADMIN", "MANAGER", "SALES", "WAREHOUSE"]);
+
+        const courier = await COURIER.findById(_id);
+
+        if (!courier) {
+          throw new UserInputError("Courier not found");
+        }
+
+        return courier;
+
+      } catch (err) {
+        console.error("GetCourierById error:", err);
+
+        if (err instanceof UserInputError) throw err;
+        if (err instanceof AuthenticationError) throw err;
+
+        throw new ApolloError("Failed to fetch courier");
+      }
     },
 
 
@@ -148,28 +176,48 @@ console.log("")
       return updated;
     },
 
-        CreateCourier: async (_, { data }, ctx) => {
+  CreateCourier: async (_, { data }, ctx) => {
       requireRoles(ctx, ["ADMIN", "MANAGER"]);
 
       try {
         const created = await COURIER.create({
           name: data.name,
           isActive: data.isActive ?? true,
+          charges: {
+            baseCharge: data?.charges?.baseCharge ?? 0,
+            codCharge: data?.charges?.codCharge ?? 0,
+            returnCharge: data?.charges?.returnCharge ?? 0,
+          },
         });
+
         return created;
       } catch (err) {
+        console.error("CreateCourier error:", err);
         if (err.code === 11000) throw new UserInputError("Courier name already exists");
         throw new Error("Failed to create courier");
       }
     },
 
-      UpdateCourier: async (_, { _id, data }, ctx) => {
+       UpdateCourier: async (_, { _id, data }, ctx) => {
       requireRoles(ctx, ["ADMIN", "MANAGER"]);
 
       try {
         const update = {};
+
         if (data.name !== undefined) update.name = data.name;
         if (data.isActive !== undefined) update.isActive = data.isActive;
+
+        // ✅ Nested charges update (only update sent fields)
+        if (data.charges !== undefined) {
+          if (data.charges.baseCharge !== undefined)
+            update["charges.baseCharge"] = data.charges.baseCharge;
+
+          if (data.charges.codCharge !== undefined)
+            update["charges.codCharge"] = data.charges.codCharge;
+
+          if (data.charges.returnCharge !== undefined)
+            update["charges.returnCharge"] = data.charges.returnCharge;
+        }
 
         const updated = await COURIER.findByIdAndUpdate(
           _id,
@@ -180,23 +228,21 @@ console.log("")
         if (!updated) throw new UserInputError("Courier not found");
         return updated;
       } catch (err) {
+        console.error("UpdateCourier error:", err);
         if (err.code === 11000) throw new UserInputError("Courier name already exists");
         throw new Error("Failed to update courier");
       }
     },
 
-      DeleteCourier: async (_, { _id }, ctx) => {
+     DeleteCourier: async (_, { _id }, ctx) => {
       requireRoles(ctx, ["ADMIN", "MANAGER"]);
 
       const deleted = await COURIER.findByIdAndDelete(_id);
       if (!deleted) throw new UserInputError("Courier not found");
+
       return "Courier deleted successfully";
     },
 
-
-
   },
-
-
 
 };

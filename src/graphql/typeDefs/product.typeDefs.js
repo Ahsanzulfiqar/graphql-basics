@@ -5,7 +5,7 @@ import  {gql} from "apollo-server-express"
 const productTypeDefs =  gql`
 
     type Query {
-    GetAllProducts: [Product!]!
+  GetAllProducts: [Product!]!
   GetProductById(_id: ID!): Product
   GetVariantsByProduct(productId: ID!): [ProductVariant!]!
   GetVariantById(_id: ID!): ProductVariant
@@ -23,6 +23,8 @@ const productTypeDefs =  gql`
     #  UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
 
     },
+
+    
 type Product {
   _id: ID!
   name: String!

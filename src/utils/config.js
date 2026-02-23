@@ -24,7 +24,7 @@ const MONGO_URL =
   `mongodb+srv://${encodeURIComponent(MONGO_USER)}:${encodeURIComponent(
     MONGO_PASS
   )}@${MONGO_HOST}/${MONGO_DB}?retryWrites=true&w=majority`;
-
+console.log(MONGO_URL)
 export {
   NODE_ENV,
   PORT,

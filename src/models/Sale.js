@@ -85,15 +85,25 @@ const saleSchema = new Schema(
     invoiceNo: { type: String, trim: true },
     customerName: { type: String, trim: true },
     customerPhone: { type: String, trim: true },
+    country:{ type:String},
+    city:{ type:String},
     address: { type: String, trim: true },
-
-    // Shipping / Tracking (set at out_for_delivery)
-    courierName: { type: String, trim: true },
-    trackingNo: { type: String, trim: true },
-    trackingUrl: { type: String, trim: true },
     deliveryNotes: { type: String, trim: true },
     shippedAt: { type: Date },
+    courier: {
+      courierId: { type: Schema.Types.ObjectId, ref: "courier" },
+      courierName: String,
+      charges: {
+          baseCharge: { type: Number, default: 0 },
+          codCharge: { type: Number, default: 0 },
+          returnCharge: { type: Number, default: 0 },
+               },
+      trackingNo: String,
+      trackingUrl: String,
+},
 
+
+    
     // Status Workflow
     status: {
       type: String,

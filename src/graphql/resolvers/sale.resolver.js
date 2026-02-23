@@ -360,6 +360,8 @@ CreateSale: async (_, { data }, ctx) => {
           invoiceNo: data.invoiceNo,
           customerName: data.customerName,
           customerPhone: data.customerPhone,
+          country:data.country,
+          city:data.city,
           address: data.address,
 
           status,
@@ -564,7 +566,7 @@ CreateSale: async (_, { data }, ctx) => {
     MarkOutForDelivery: async (_, { saleId, data }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
 
-  // ✅ Only internal roles should move to out_for_delivery
+  // ✅ Only internal roles can move to out_for_delivery
   if (!["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role)) {
     throw new ForbiddenError("Not allowed to mark out for delivery");
   }
@@ -585,31 +587,59 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError("Only confirmed sale can be marked out for delivery");
     }
 
-    if (!data?.courierName?.trim()) throw new UserInputError("courierName is required");
+    // ✅ validate courierId + trackingNo
+    if (!data?.courierId || !mongoose.Types.ObjectId.isValid(data.courierId)) {
+      throw new UserInputError("Valid courierId is required");
+    }
     if (!data?.trackingNo?.trim()) throw new UserInputError("trackingNo is required");
 
-    sale.courierName = data.courierName.trim();
-    sale.trackingNo = data.trackingNo.trim();
-    sale.trackingUrl = data.trackingUrl?.trim();
-    sale.deliveryNotes = data.deliveryNotes?.trim();
-    sale.shippedAt = data.shippedAt ? new Date(data.shippedAt) : new Date();
+    const courier = await COURIER.findById(data.courierId).session(session);
+    if (!courier || courier.isActive === false) {
+      throw new UserInputError("Courier not found or inactive");
+    }
 
+    const isCOD = data?.isCOD === true;
+
+    // ✅ copy charges snapshot (round to 2 decimals)
+    const baseCharge = Number(((courier.charges?.baseCharge ?? 0)).toFixed(2));
+    const codCharge = Number((isCOD ? (courier.charges?.codCharge ?? 0) : 0).toFixed(2));
+    const returnCharge = Number(((courier.charges?.returnCharge ?? 0)).toFixed(2));
+
+    // ✅ set nested courier block (your new schema)
+    sale.courier = {
+      courierId: courier._id,
+      courierName: courier.name,
+      charges: {
+        baseCharge,
+        codCharge,
+        returnCharge,
+      },
+      trackingNo: data.trackingNo.trim(),
+      trackingUrl: data.trackingUrl?.trim(),
+    };
+
+    // Optional additional fields (only if you still keep them)
+    if (data.deliveryNotes !== undefined) sale.deliveryNotes = data.deliveryNotes?.trim();
+    if (data.shippedAt) sale.shippedAt = new Date(data.shippedAt);
+
+    // ✅ status change
     sale.status = "out_for_delivery";
 
     // ✅ timestamps
     if (!sale.statusTimestamps) sale.statusTimestamps = {};
     if (!sale.statusTimestamps.draftAt) sale.statusTimestamps.draftAt = sale.createdAt || new Date();
-    if (!sale.statusTimestamps.confirmedAt && sale.status === "confirmed") sale.statusTimestamps.confirmedAt = new Date();
-    sale.statusTimestamps.outForDeliveryAt = new Date();
+    if (!sale.statusTimestamps.confirmedAt) sale.statusTimestamps.confirmedAt = sale.createdAt || new Date();
+    if (!sale.statusTimestamps.outForDeliveryAt) sale.statusTimestamps.outForDeliveryAt = new Date();
 
-    // ✅ history (use pushHistory if you already have it)
-    const note = `Courier: ${sale.courierName}, Tracking: ${sale.trackingNo}`;
-    if (typeof pushHistory === "function") {
-      pushHistory(sale, { status: "out_for_delivery", by: ctx.user._id, note });
-    } else {
-      if (!Array.isArray(sale.statusHistory)) sale.statusHistory = [];
-      sale.statusHistory.push({ status: "out_for_delivery", at: new Date(), by: ctx.user._id, note });
-    }
+    // ✅ history
+    const note = `Courier assigned: ${courier.name}, Tracking: ${sale.courier.trackingNo}`;
+    if (!Array.isArray(sale.statusHistory)) sale.statusHistory = [];
+    sale.statusHistory.push({
+      status: "out_for_delivery",
+      at: new Date(),
+      by: ctx.user._id,
+      note,
+    });
 
     await sale.save({ session });
 

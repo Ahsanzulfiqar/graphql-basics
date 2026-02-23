@@ -52,10 +52,20 @@ input UpdateProjectInput {
   isActive: Boolean
 }
 
+type CourierCharges {
+  baseCharge: Float
+  codCharge: Float
+  returnCharge: Float
+}
+
+
+
+
 type Courier {
   _id: ID!
   name: String!
   isActive: Boolean!
+  charges: CourierCharges!
   createdAt: String
   updatedAt: String
 }
@@ -63,12 +73,23 @@ type Courier {
 input CreateCourierInput {
   name: String!
   isActive: Boolean
+  charges: CourierChargesInput
+
 }
 
 input UpdateCourierInput {
   name: String
   isActive: Boolean
+  charges: CourierChargesInput
 }
+
+
+input CourierChargesInput {
+  baseCharge: Float
+  codCharge: Float
+  returnCharge: Float
+}
+
 
 `
 export default projectTypeDefs;
