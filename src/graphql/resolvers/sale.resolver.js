@@ -6,6 +6,7 @@ import WAREHOUSE from "../../models/warehouse.js";
 import PRODUCT from "../../models/Product.js";
 import PRODUCT_VARIANT from "../../models/ProductVarient.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
+import COURIER from "../../models/Courier.js"
 import { reserveStock, releaseReservedStock,addBackToBatch } from "../../services/stock.helpers.js";
 import { fifoConsume } from "../../services/fifoConsume.js";
 import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";

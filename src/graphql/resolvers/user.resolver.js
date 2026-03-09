@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import { AuthenticationError, ForbiddenError, UserInputError } from "apollo-server-express";
 import USER from "../../models/User.js"
 import PROJECT from "../../models/Project.js";
-import WAREHOUSE from "../../models/Warehouse.js";
+import WAREHOUSE from "../../models/warehouse.js";
 import { generateToken } from "../../auth/jwt/jwt.js";
 
 const requireAuth = (ctx) => {
