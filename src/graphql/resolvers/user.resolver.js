@@ -72,9 +72,8 @@ export default {
 
   Mutation: {
     Register: async (_, { data }) => {
-        console.log("in")
+      
       const email = normalizeEmail(data.email);
-
       const exists = await USER.findOne({ email });
       if (exists) throw new UserInputError("Email already exists");
 

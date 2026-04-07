@@ -36,18 +36,22 @@ export const generateToken = (type, payload) => {
   return jwt.sign({ ...payload, type }, cfg.secret, cfg.signOptions);
 };
 
- export const verifyToken = async (token) => {
+export const verifyToken = (token) => {
+  if (!token) {
+    throw new AuthenticationError("No token provided");
+  }
 
-  const data = await jwt.verify(token, SECRET, async (err, data) => {
-    if (err) {
-      console.log(err, "verifyToken Error");
-      throw new AuthenticationError(
-        "Authentication token is invalid, please try again."
-      );
-    }
-    return data;
-  });
+  try {
+    const cleanToken = token.startsWith("Bearer ")
+      ? token.slice(7)
+      : token;
 
-  return data;
+    return jwt.verify(cleanToken, SECRET);
+  } catch (err) {
+    console.log(err, "verifyToken Error");
+    throw new AuthenticationError(
+      "Authentication token is invalid or expired"
+    );
+  }
 };
 
