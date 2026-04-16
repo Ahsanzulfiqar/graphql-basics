@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 const { Schema, model } = mongoose;
 
 /**
- * 🧩 Sub-schema for each product/variant line item in the purchase
+ * 🧩 Purchase item
  */
 const purchaseItemSchema = new Schema(
   {
@@ -11,21 +11,20 @@ const purchaseItemSchema = new Schema(
       ref: "product",
       required: true,
     },
-    productName:{
+    productName: {
       type: String,
       required: true,
     },
     variant: {
       type: Schema.Types.ObjectId,
       ref: "productVarient",
-      required:false,
+      required: false,
     },
-    variantName:{
+    variantName: {
       type: String,
       required: false,
     },
-    
- sku:{
+    sku: {
       type: String,
       required: true,
     },
@@ -57,7 +56,7 @@ const purchaseItemSchema = new Schema(
 );
 
 /**
- * 🧾 Main Purchase schema
+ * 🧾 Purchase schema
  */
 const purchaseSchema = new Schema(
   {
@@ -72,7 +71,6 @@ const purchaseSchema = new Schema(
       trim: true,
     },
 
-    // 🔗 Better to store warehouse as ObjectId (so it links to Warehouse model)
     warehouse: {
       type: Schema.Types.ObjectId,
       ref: "warehouse",
@@ -121,7 +119,30 @@ const purchaseSchema = new Schema(
       default: false,
     },
 
-        // Soft delete
+    // ✅ NEW payment block
+    payment: {
+      status: {
+        type: String,
+        enum: ["unpaid", "paid"],
+        default: "unpaid",
+        index: true,
+      },
+      paidAmount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      balanceAmount: {
+        type: Number,
+        default: 0,
+        min: 0,
+        index: true,
+      },
+      paidAt: {
+        type: Date,
+      },
+    },
+
     isDeleted: {
       type: Boolean,
       default: false,
@@ -130,9 +151,36 @@ const purchaseSchema = new Schema(
     deletedAt: {
       type: Date,
     },
-
   },
   { timestamps: true }
 );
+
+/**
+ * ✅ Payment defaults and calculations
+ */
+purchaseSchema.pre("save", function (next) {
+  if (!this.payment) {
+    this.payment = {
+      status: "unpaid",
+      paidAmount: 0,
+      balanceAmount: this.totalAmount || 0,
+    };
+  }
+
+  const totalAmount = Number(this.totalAmount || 0);
+  const paidAmount = Number(this.payment.paidAmount || 0);
+
+  this.payment.paidAmount = paidAmount;
+  this.payment.balanceAmount = Math.max(totalAmount - paidAmount, 0);
+
+  this.payment.status =
+    this.payment.balanceAmount <= 0 ? "paid" : "unpaid";
+
+  next();
+});
+
+purchaseSchema.index({ warehouse: 1, createdAt: 1, postedToStock: 1, isDeleted: 1 });
+purchaseSchema.index({ "payment.status": 1 });
+purchaseSchema.index({ "payment.balanceAmount": 1 });
 
 export default model("purchase", purchaseSchema);

@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 const { Schema, model } = mongoose;
 
@@ -31,6 +30,13 @@ const warehouseStockSchema = new Schema(
       default: 0,
     },
 
+    // ✅ NEW
+    avgCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     batches: [
       {
         batchNo: String,
@@ -42,6 +48,11 @@ const warehouseStockSchema = new Schema(
   { timestamps: true }
 );
 
-warehouseStockSchema.index({ warehouse: 1, product: 1, variant: 1 }, { unique: true });
+warehouseStockSchema.index(
+  { warehouse: 1, product: 1, variant: 1 },
+  { unique: true }
+);
+
+warehouseStockSchema.index({ warehouse: 1, quantity: 1, reserved: 1, reorderLevel: 1 });
 
 export default model("wareHouseStock", warehouseStockSchema);

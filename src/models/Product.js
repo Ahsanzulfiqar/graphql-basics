@@ -33,7 +33,7 @@ const productSchema = new Schema(
     subCategory:{
       type: Schema.Types.ObjectId, ref: "subCategory",
       type: String,
-      required: true,
+      required: false,
     },
 
     // ...

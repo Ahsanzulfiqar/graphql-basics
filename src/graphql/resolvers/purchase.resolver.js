@@ -164,7 +164,7 @@ CreatePurchase: async (_, { data }, ctx) => {
       throw new UserInputError(`Invalid product ids: ${badProductIds.join(", ")}`);
     }
 
-    // Validate variant ids format (only if provided)
+    // Validate variant ids format
     const badVariantIds = variantIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
     if (badVariantIds.length) {
       throw new UserInputError(`Invalid variant ids: ${badVariantIds.join(", ")}`);
@@ -179,7 +179,7 @@ CreatePurchase: async (_, { data }, ctx) => {
       throw new UserInputError(`Invalid product ids: ${missingProducts.join(", ")}`);
     }
 
-    // 4) Fetch variants ONLY if some were sent
+    // 4) Fetch variants only if provided
     let variantMap = new Map();
     if (variantIds.length > 0) {
       const variants = await PRODUCTVARIANT.find({ _id: { $in: variantIds } }).select("_id name sku");
@@ -205,22 +205,22 @@ CreatePurchase: async (_, { data }, ctx) => {
         throw new UserInputError(`Invalid purchasePrice for item index ${index}`);
       }
 
+      const qty = Number(it.quantity);
+      const purchasePrice = Number(it.purchasePrice);
+
       const productDoc = productMap.get(it.product);
       const variantDoc = it.variant ? variantMap.get(it.variant) : null;
 
-      const lineTotal = Number((it.quantity * it.purchasePrice).toFixed(2));
+      const lineTotal = Number((qty * purchasePrice).toFixed(2));
 
       return {
         product: new mongoose.Types.ObjectId(it.product),
         productName: productDoc?.name ?? it.productName ?? "",
-
-        // ✅ variant is optional
         variant: it.variant ? new mongoose.Types.ObjectId(it.variant) : undefined,
         variantName: variantDoc?.name ?? it.variantName ?? "",
-
         sku: variantDoc?.sku ?? productDoc?.sku ?? it.sku ?? "",
-        quantity: it.quantity,
-        purchasePrice: it.purchasePrice,
+        quantity: qty,
+        purchasePrice,
         lineTotal,
         batchNo: it.batchNo,
         expiryDate: it.expiryDate ? new Date(it.expiryDate) : undefined,
@@ -232,7 +232,19 @@ CreatePurchase: async (_, { data }, ctx) => {
     const taxAmount = Number((data.taxAmount ?? 0).toFixed(2));
     const totalAmount = Number((subTotal + taxAmount).toFixed(2));
 
-    // 7) Create purchase
+    // 7) Payment block
+    const paidAmount = Number(data?.payment?.paidAmount ?? 0);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      throw new UserInputError("Invalid payment.paidAmount");
+    }
+    if (paidAmount > totalAmount) {
+      throw new UserInputError("payment.paidAmount cannot be greater than totalAmount");
+    }
+
+    const balanceAmount = Number((totalAmount - paidAmount).toFixed(2));
+    const paymentStatus = balanceAmount <= 0 ? "paid" : "unpaid";
+
+    // 8) Create purchase
     const doc = await PURCHASE.create({
       supplierName: data.supplierName,
       invoiceNo: data.invoiceNo,
@@ -245,12 +257,20 @@ CreatePurchase: async (_, { data }, ctx) => {
       totalAmount,
       notes: data.notes,
       postedToStock: false,
+
+      // ✅ NEW
+      payment: {
+        status: paymentStatus,
+        paidAmount,
+        balanceAmount,
+        paidAt: paymentStatus === "paid" ? new Date() : undefined,
+      },
     });
 
     return doc;
   } catch (error) {
     console.log(error);
-    throw error; // ✅ important: don't swallow errors
+    throw error;
   }
 },
 
@@ -464,22 +484,33 @@ PostToStock: async (_, { purchaseId }) => {
 
     const purchase = await PURCHASE.findById(purchaseId).session(session).exec();
 
-    if (!purchase || purchase.isDeleted) throw new UserInputError("Purchase not found");
-    if (purchase.postedToStock) throw new UserInputError("Purchase already posted to stock");
-    if (purchase.status === "cancelled") throw new UserInputError("Cancelled purchase cannot be posted");
-    if (purchase.status !== "confirmed") throw new UserInputError("Only confirmed purchases can be posted to stock");
+    if (!purchase || purchase.isDeleted) {
+      throw new UserInputError("Purchase not found");
+    }
+
+    if (purchase.postedToStock) {
+      throw new UserInputError("Purchase already posted to stock");
+    }
+
+    if (purchase.status === "cancelled") {
+      throw new UserInputError("Cancelled purchase cannot be posted");
+    }
+
+    if (purchase.status !== "confirmed") {
+      throw new UserInputError("Only confirmed purchases can be posted to stock");
+    }
 
     if (!purchase.items || purchase.items.length === 0) {
       throw new UserInputError("Purchase has no items to post");
     }
 
     const warehouse = await WAREHOUSE.findById(purchase.warehouse).session(session).exec();
-    if (!warehouse) throw new UserInputError("Warehouse not found for this purchase");
+    if (!warehouse) {
+      throw new UserInputError("Warehouse not found for this purchase");
+    }
 
-    // product ids always exist
     const productIds = [...new Set(purchase.items.map((it) => it.product?.toString()).filter(Boolean))];
 
-    // variant ids only if provided
     const variantIds = [
       ...new Set(
         purchase.items
@@ -488,29 +519,32 @@ PostToStock: async (_, { purchaseId }) => {
       ),
     ];
 
-    // Validate Products
     const products = await PRODUCT.find({ _id: { $in: productIds } })
       .select("_id")
       .session(session);
+
     const productSet = new Set(products.map((p) => p._id.toString()));
     const missingProducts = productIds.filter((id) => !productSet.has(id));
-    if (missingProducts.length) throw new UserInputError(`Products not found: ${missingProducts.join(", ")}`);
+    if (missingProducts.length) {
+      throw new UserInputError(`Products not found: ${missingProducts.join(", ")}`);
+    }
 
-    // Validate Variants only if provided
     if (variantIds.length > 0) {
       const variants = await PRODUCTVARIANT.find({ _id: { $in: variantIds } })
         .select("_id")
         .session(session);
+
       const variantSet = new Set(variants.map((v) => v._id.toString()));
       const missingVariants = variantIds.filter((id) => !variantSet.has(id));
-      if (missingVariants.length) throw new UserInputError(`Variants not found: ${missingVariants.join(", ")}`);
+      if (missingVariants.length) {
+        throw new UserInputError(`Variants not found: ${missingVariants.join(", ")}`);
+      }
     }
 
-    // Ledger + stock update
     const ledgerDocs = [];
 
     for (const item of purchase.items) {
-      const qty = item.quantity;
+      const qty = Number(item.quantity || 0);
 
       const row = {
         purchase: purchase._id,
@@ -525,8 +559,9 @@ PostToStock: async (_, { purchaseId }) => {
         notes: "Posted from purchase",
       };
 
-      // ✅ include variant only if exists
-      if (item.variant) row.variant = item.variant;
+      if (item.variant) {
+        row.variant = item.variant;
+      }
 
       ledgerDocs.push(row);
 
@@ -534,10 +569,11 @@ PostToStock: async (_, { purchaseId }) => {
         {
           warehouse: purchase.warehouse,
           product: item.product,
-          variant: item.variant || undefined, // optional
+          variant: item.variant || undefined,
           batchNo: item.batchNo,
           expiryDate: item.expiryDate,
           deltaQty: qty,
+          purchasePrice: item.purchasePrice, // ✅ NEW
         },
         session
       );
@@ -555,11 +591,10 @@ PostToStock: async (_, { purchaseId }) => {
     session.endSession();
 
     return {
-  ...purchase.toObject(),
-  warehouse: String(purchase.warehouse),
-  warehouseName: warehouse?.name || null,
-};
-    // return purchase;
+      ...purchase.toObject(),
+      warehouse: String(purchase.warehouse),
+      warehouseName: warehouse?.name || null,
+    };
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -618,14 +653,14 @@ DeletePurchase: async (_, { id }, ctx) => {
 
     const purchase = await PURCHASE.findById(id).session(session);
 
-    // Already deleted / not found
+    // Not found or already deleted
     if (!purchase || purchase.isDeleted) {
       await session.commitTransaction();
       session.endSession();
       return true;
     }
 
-    // If already cancelled, just soft delete it (no stock impact)
+    // Already cancelled => only soft delete
     if (purchase.status === "cancelled") {
       purchase.isDeleted = true;
       purchase.deletedAt = new Date();
@@ -636,10 +671,10 @@ DeletePurchase: async (_, { id }, ctx) => {
       return true;
     }
 
-    // ✅ CASE 1: draft/confirmed => cancel + soft delete (no stock)
+    // Draft / Confirmed => no stock rollback needed
     if (purchase.status === "draft" || purchase.status === "confirmed") {
       purchase.status = "cancelled";
-      purchase.postedToStock = false; // ensure
+      purchase.postedToStock = false;
       purchase.isDeleted = true;
       purchase.deletedAt = new Date();
       await purchase.save({ session });
@@ -649,11 +684,9 @@ DeletePurchase: async (_, { id }, ctx) => {
       return true;
     }
 
-    // ✅ CASE 2: received => reverse stock + ledger + cancel + soft delete
+    // Received => reverse stock + ledger, then soft delete
     if (purchase.status === "received") {
       if (!purchase.postedToStock) {
-        // data inconsistency: received should be postedToStock=true
-        // still allow cancel as no-stock case
         purchase.status = "cancelled";
         purchase.isDeleted = true;
         purchase.deletedAt = new Date();
@@ -671,22 +704,24 @@ DeletePurchase: async (_, { id }, ctx) => {
       const reverseLedgerDocs = [];
 
       for (const item of purchase.items) {
-        const qty = item.quantity;
+        const qty = Number(item.quantity || 0);
 
-        // Reverse stock movement
+        if (!qty || qty <= 0) {
+          throw new UserInputError("Invalid item quantity in purchase");
+        }
+
         await applyStockMovement(
           {
             warehouse: purchase.warehouse,
             product: item.product,
-            variant: item.variant || undefined, // ✅ optional variant
+            variant: item.variant || undefined,
             batchNo: item.batchNo,
             expiryDate: item.expiryDate,
-            deltaQty: -qty, // remove stock
+            deltaQty: -qty,
           },
           session
         );
 
-        // Reversal ledger row (variant optional)
         const ledgerRow = {
           purchase: purchase._id,
           product: item.product,
@@ -700,7 +735,9 @@ DeletePurchase: async (_, { id }, ctx) => {
           notes: "Reversal of received purchase on delete",
         };
 
-        if (item.variant) ledgerRow.variant = item.variant; // ✅ only if exists
+        if (item.variant) {
+          ledgerRow.variant = item.variant;
+        }
 
         reverseLedgerDocs.push(ledgerRow);
       }
@@ -709,9 +746,8 @@ DeletePurchase: async (_, { id }, ctx) => {
         await STOCK_LEDGER.insertMany(reverseLedgerDocs, { session });
       }
 
-      // Soft delete purchase after reversal
       purchase.status = "cancelled";
-      purchase.postedToStock = false; // now rolled back
+      purchase.postedToStock = false;
       purchase.isDeleted = true;
       purchase.deletedAt = new Date();
       await purchase.save({ session });
@@ -721,7 +757,6 @@ DeletePurchase: async (_, { id }, ctx) => {
       return true;
     }
 
-    // Unknown status safeguard
     throw new UserInputError(`Unsupported purchase status: ${purchase.status}`);
   } catch (err) {
     await session.abortTransaction();

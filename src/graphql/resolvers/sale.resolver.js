@@ -7,6 +7,7 @@ import PRODUCT from "../../models/Product.js";
 import PRODUCT_VARIANT from "../../models/ProductVarient.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
 import COURIER from "../../models/Courier.js"
+import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
 import { reserveStock, releaseReservedStock,addBackToBatch } from "../../services/stock.helpers.js";
 import { fifoConsume } from "../../services/fifoConsume.js";
 import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
@@ -243,7 +244,6 @@ CreateSale: async (_, { data }, ctx) => {
   const isAdminManager = ["ADMIN", "MANAGER"].includes(ctx.user.role);
   const isSellerSales = ["SELLER", "SALES"].includes(ctx.user.role);
 
-  // optional: block unknown roles
   if (!isAdminManager && !isSellerSales) {
     throw new ForbiddenError("Not allowed to create sale");
   }
@@ -253,72 +253,134 @@ CreateSale: async (_, { data }, ctx) => {
 
   try {
     // ---------- Validate seller + warehouse ----------
-    if (!mongoose.Types.ObjectId.isValid(data.sellerId)) throw new UserInputError("Invalid sellerId");
-    if (!mongoose.Types.ObjectId.isValid(data.warehouseId)) throw new UserInputError("Invalid warehouseId");
+    if (!mongoose.Types.ObjectId.isValid(data.sellerId)) {
+      throw new UserInputError("Invalid sellerId");
+    }
+    if (!mongoose.Types.ObjectId.isValid(data.warehouseId)) {
+      throw new UserInputError("Invalid warehouseId");
+    }
 
-    const seller = await SELLER.findOne({ _id: data.sellerId, isDeleted: { $ne: true } }).session(session);
+    const seller = await SELLER.findOne({
+      _id: data.sellerId,
+      isDeleted: { $ne: true },
+    }).session(session);
     if (!seller) throw new UserInputError("Seller not found");
 
     const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
     if (!warehouse) throw new UserInputError("Warehouse not found");
 
-    if (!data.items || data.items.length === 0) throw new UserInputError("Sale items required");
+    if (!data.items || data.items.length === 0) {
+      throw new UserInputError("Sale items required");
+    }
 
     // ---------- Collect + validate IDs ----------
     const productIds = [...new Set(data.items.map((i) => i.productId).filter(Boolean))];
     const variantIds = [...new Set(data.items.map((i) => i.variantId).filter(Boolean))];
 
     const badProducts = productIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-    if (badProducts.length) throw new UserInputError(`Invalid productId(s): ${badProducts.join(", ")}`);
+    if (badProducts.length) {
+      throw new UserInputError(`Invalid productId(s): ${badProducts.join(", ")}`);
+    }
 
     const badVariants = variantIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-    if (badVariants.length) throw new UserInputError(`Invalid variantId(s): ${badVariants.join(", ")}`);
+    if (badVariants.length) {
+      throw new UserInputError(`Invalid variantId(s): ${badVariants.join(", ")}`);
+    }
 
     // ---------- Ensure products/variants exist ----------
     const [products, variants] = await Promise.all([
-      PRODUCT.find({ _id: { $in: productIds } }).select("_id").session(session),
+      PRODUCT.find({ _id: { $in: productIds } })
+        .select("_id name sku")
+        .session(session),
+
       variantIds.length
-        ? PRODUCT_VARIANT.find({ _id: { $in: variantIds } }).select("_id product").session(session)
+        ? PRODUCT_VARIANT.find({ _id: { $in: variantIds } })
+            .select("_id name sku product")
+            .session(session)
         : Promise.resolve([]),
     ]);
 
-    if (products.length !== productIds.length) throw new UserInputError("One or more products not found");
-    if (variantIds.length && variants.length !== variantIds.length) throw new UserInputError("One or more variants not found");
+    if (products.length !== productIds.length) {
+      throw new UserInputError("One or more products not found");
+    }
+
+    if (variantIds.length && variants.length !== variantIds.length) {
+      throw new UserInputError("One or more variants not found");
+    }
+
+    const productMap = new Map(products.map((p) => [String(p._id), p]));
+    const variantMap = new Map(variants.map((v) => [String(v._id), v]));
 
     // ---------- Ensure each variant belongs to its product ----------
-    const variantMap = new Map(variants.map((v) => [String(v._id), String(v.product)]));
     for (const it of data.items) {
       if (it.variantId) {
-        const belongsTo = variantMap.get(String(it.variantId));
-        if (belongsTo && belongsTo !== String(it.productId)) {
+        const variantDoc = variantMap.get(String(it.variantId));
+        if (variantDoc && String(variantDoc.product) !== String(it.productId)) {
           throw new UserInputError("Variant does not belong to the given product");
         }
       }
     }
 
-    // ---------- Build items (✅ optional variant) ----------
+    // ---------- Fetch warehouse stock for cost snapshot ----------
+    const stockQuery = data.items.map((i) => ({
+      warehouse: new mongoose.Types.ObjectId(data.warehouseId),
+      product: new mongoose.Types.ObjectId(i.productId),
+      ...(i.variantId ? { variant: new mongoose.Types.ObjectId(i.variantId) } : { variant: { $in: [null, undefined] } }),
+    }));
+
+    const stockDocs = await WAREHOUSE_STOCK.find({
+      $or: stockQuery,
+    })
+      .select("_id warehouse product variant quantity reserved avgCost")
+      .session(session);
+
+    const stockMap = new Map(
+      stockDocs.map((s) => [
+        `${String(s.warehouse)}-${String(s.product)}-${s.variant ? String(s.variant) : "no-variant"}`,
+        s,
+      ])
+    );
+
+    // ---------- Build items ----------
     const items = data.items.map((i, idx) => {
       const qty = Number(i.quantity);
       const price = Number(i.salePrice);
 
-      if (!Number.isFinite(qty) || qty <= 0) throw new UserInputError(`Invalid quantity at item ${idx}`);
-      if (!Number.isFinite(price) || price < 0) throw new UserInputError(`Invalid salePrice at item ${idx}`);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new UserInputError(`Invalid quantity at item ${idx}`);
+      }
 
+      if (!Number.isFinite(price) || price < 0) {
+        throw new UserInputError(`Invalid salePrice at item ${idx}`);
+      }
+
+      const productDoc = productMap.get(String(i.productId));
+      const variantDoc = i.variantId ? variantMap.get(String(i.variantId)) : null;
+
+      const stockKey = `${String(data.warehouseId)}-${String(i.productId)}-${i.variantId ? String(i.variantId) : "no-variant"}`;
+      const stockDoc = stockMap.get(stockKey);
+
+      const costPrice = Number(stockDoc?.avgCost || 0);
+      const lineCost = Number((qty * costPrice).toFixed(2));
       const lineTotal = Number((qty * price).toFixed(2));
 
       const doc = {
-        product: i.productId,
-        productName: i.productName,
-        sku: i.sku,
+        product: new mongoose.Types.ObjectId(i.productId),
+        productName: i.productName || productDoc?.name || "",
+        sku: i.sku || variantDoc?.sku || productDoc?.sku || "",
         quantity: qty,
         salePrice: price,
+
+        // ✅ NEW
+        costPrice,
+        lineCost,
+
         lineTotal,
       };
 
-      // only add variant fields when variant exists
       if (i.variantId) {
-        doc.variant = i.variantId;
-        doc.variantName = i.variantName;
+        doc.variant = new mongoose.Types.ObjectId(i.variantId);
+        doc.variantName = i.variantName || variantDoc?.name || "";
       }
 
       return doc;
@@ -329,20 +391,29 @@ CreateSale: async (_, { data }, ctx) => {
     const taxAmount = Number((data.taxAmount || 0).toFixed(2));
     const totalAmount = Number((subTotal + taxAmount).toFixed(2));
 
+    // ---------- Payment block ----------
+    const paidAmount = Number(data?.payment?.paidAmount ?? 0);
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      throw new UserInputError("Invalid payment.paidAmount");
+    }
+    if (paidAmount > totalAmount) {
+      throw new UserInputError("payment.paidAmount cannot be greater than totalAmount");
+    }
+
+    const balanceAmount = Number((totalAmount - paidAmount).toFixed(2));
+    const paymentStatus = balanceAmount <= 0 ? "paid" : "unpaid";
+
     // ---------- Role-based status ----------
-    // Admin/Manager => confirmed (reserve stock)
-    // Seller/Sales  => draft
     const now = new Date();
     const status = isAdminManager ? "confirmed" : "draft";
 
-    // timestamps
     const statusTimestamps = { draftAt: now };
     if (status === "confirmed") statusTimestamps.confirmedAt = now;
 
-    // history: always include draft, then confirmed for admin/manager
     const statusHistory = [
       { status: "draft", at: now, by: ctx.user._id, note: "Sale created" },
     ];
+
     if (status === "confirmed") {
       statusHistory.push({
         status: "confirmed",
@@ -361,8 +432,8 @@ CreateSale: async (_, { data }, ctx) => {
           invoiceNo: data.invoiceNo,
           customerName: data.customerName,
           customerPhone: data.customerPhone,
-          country:data.country,
-          city:data.city,
+          country: data.country,
+          city: data.city,
           address: data.address,
 
           status,
@@ -374,6 +445,16 @@ CreateSale: async (_, { data }, ctx) => {
           notes: data.notes,
           statusTimestamps,
           statusHistory,
+
+          // ✅ NEW
+          payment: {
+            status: paymentStatus,
+            mode: data?.payment?.mode || "COD",
+            bankAccount: data?.payment?.bankAccount,
+            paidAmount,
+            balanceAmount,
+            paidAt: paymentStatus === "paid" ? new Date() : undefined,
+          },
         },
       ],
       { session }
@@ -386,7 +467,7 @@ CreateSale: async (_, { data }, ctx) => {
           {
             warehouseId: sale.warehouse,
             productId: it.product,
-            variantId: it.variant, // optional
+            variantId: it.variant,
             qty: it.quantity,
           },
           session

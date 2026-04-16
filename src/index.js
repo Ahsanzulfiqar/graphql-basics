@@ -33,6 +33,7 @@ import saleTypeDefs from "./graphql/typeDefs/sale.typeDefs.js";
 import userTypeDefs from "./graphql/typeDefs/user.typeDefs.js";
 import projectTypeDefs from "./graphql/typeDefs/project.typeDefs.js";
 import categoryTypeDefs from "./graphql/typeDefs/category.typeDefs.js"
+import dashboardTypeDefs from "./graphql/typeDefs/dashboard.typeDefs.js"
 
 
 
@@ -49,7 +50,7 @@ await connectToDB();
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({
-  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs,sellerTypeDefs,saleTypeDefs,userTypeDefs,projectTypeDefs,categoryTypeDefs],
+  typeDefs: [warehouseTypeDefs,productTypeDefs,purchaseTypeDefs,sellerTypeDefs,saleTypeDefs,userTypeDefs,projectTypeDefs,categoryTypeDefs,dashboardTypeDefs],
   resolvers,
 });
 // ...

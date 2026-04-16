@@ -6,7 +6,7 @@ import mongoose from "mongoose";
  * deltaQty = +N (incoming) or -N (outgoing).
  */
 export async function applyStockMovement(
-  { warehouse, product, variant, batchNo, expiryDate, deltaQty },
+  { warehouse, product, variant, batchNo, expiryDate, deltaQty, purchasePrice = 0 },
   session
 ) {
   if (!deltaQty || deltaQty === 0) return;
@@ -14,10 +14,17 @@ export async function applyStockMovement(
   const warehouseId = new mongoose.Types.ObjectId(warehouse);
   const productId = new mongoose.Types.ObjectId(product);
 
-  const query = { warehouse: warehouseId, product: productId };
-
-  // ✅ variant optional
-  if (variant) query.variant = new mongoose.Types.ObjectId(variant);
+  const query = variant
+    ? {
+        warehouse: warehouseId,
+        product: productId,
+        variant: new mongoose.Types.ObjectId(variant),
+      }
+    : {
+        warehouse: warehouseId,
+        product: productId,
+        $or: [{ variant: { $exists: false } }, { variant: null }],
+      };
 
   const stock = await WAREHOUSE_STOCK.findOne(query).session(session);
 
@@ -25,26 +32,34 @@ export async function applyStockMovement(
   const exp = expiryDate ? new Date(expiryDate) : null;
   const expKey = exp ? exp.toISOString().slice(0, 10) : ""; // YYYY-MM-DD
 
+  // CREATE NEW STOCK ROW
   if (!stock) {
     if (deltaQty < 0) {
       throw new Error("Cannot reduce stock: record does not exist");
     }
 
-    // ✅ build create payload safely
+    const incomingQty = Number(deltaQty || 0);
+    const incomingPrice = Number(purchasePrice || 0);
+
     const payload = {
       warehouse: warehouseId,
       product: productId,
-      quantity: deltaQty,
+      quantity: incomingQty,
+      reserved: 0,
+      reorderLevel: 0,
+      avgCost: incomingPrice,
       batches: [],
     };
 
-    if (variant) payload.variant = new mongoose.Types.ObjectId(variant);
+    if (variant) {
+      payload.variant = new mongoose.Types.ObjectId(variant);
+    }
 
     if (batchNo) {
       payload.batches.push({
         batchNo,
         expiryDate: exp || undefined,
-        quantity: deltaQty,
+        quantity: incomingQty,
       });
     }
 
@@ -52,40 +67,82 @@ export async function applyStockMovement(
     return doc[0];
   }
 
-  // adjust main quantity
-  stock.quantity += deltaQty;
-  if (stock.quantity < 0) {
-    throw new Error("Resulting stock would be negative");
+  // STOCK IN
+  if (deltaQty > 0) {
+    const oldQty = Number(stock.quantity || 0);
+    const oldAvgCost = Number(stock.avgCost || 0);
+    const incomingQty = Number(deltaQty || 0);
+    const incomingPrice = Number(purchasePrice || 0);
+
+    const totalQty = oldQty + incomingQty;
+
+    const newAvgCost =
+      totalQty > 0
+        ? Number(
+            (
+              (oldQty * oldAvgCost + incomingQty * incomingPrice) / totalQty
+            ).toFixed(4)
+          )
+        : 0;
+
+    stock.quantity = totalQty;
+    stock.avgCost = newAvgCost;
+
+    if (batchNo) {
+      const existingBatch = stock.batches.find((b) => {
+        const bKey = b.expiryDate
+          ? new Date(b.expiryDate).toISOString().slice(0, 10)
+          : "";
+        return b.batchNo === batchNo && bKey === expKey;
+      });
+
+      if (existingBatch) {
+        existingBatch.quantity = Number(existingBatch.quantity || 0) + incomingQty;
+      } else {
+        stock.batches.push({
+          batchNo,
+          expiryDate: exp || undefined,
+          quantity: incomingQty,
+        });
+      }
+    }
   }
 
-  // adjust batches if batch specified
-  if (batchNo) {
-    const existingBatch = stock.batches.find((b) => {
-      const bKey = b.expiryDate ? new Date(b.expiryDate).toISOString().slice(0, 10) : "";
-      return b.batchNo === batchNo && bKey === expKey;
-    });
+  // STOCK OUT
+  else if (deltaQty < 0) {
+    const outgoingQty = Math.abs(Number(deltaQty || 0));
 
-    if (existingBatch) {
-      existingBatch.quantity += deltaQty;
+    if (Number(stock.quantity || 0) < outgoingQty) {
+      throw new Error("Resulting stock would be negative");
+    }
+
+    stock.quantity = Number(stock.quantity || 0) - outgoingQty;
+
+    if (batchNo) {
+      const existingBatch = stock.batches.find((b) => {
+        const bKey = b.expiryDate
+          ? new Date(b.expiryDate).toISOString().slice(0, 10)
+          : "";
+        return b.batchNo === batchNo && bKey === expKey;
+      });
+
+      if (!existingBatch) {
+        throw new Error(`Cannot reduce stock for missing batch ${batchNo}`);
+      }
+
+      existingBatch.quantity = Number(existingBatch.quantity || 0) - outgoingQty;
+
       if (existingBatch.quantity < 0) {
         throw new Error("Resulting batch stock would be negative");
       }
-      stock.batches = stock.batches.filter((b) => b.quantity > 0);
-    } else if (deltaQty > 0) {
-      stock.batches.push({
-        batchNo,
-        expiryDate: exp || undefined,
-        quantity: deltaQty,
-      });
-    } else {
-      throw new Error(`Cannot reduce stock for missing batch ${batchNo}`);
+
+      stock.batches = stock.batches.filter((b) => Number(b.quantity || 0) > 0);
     }
   }
 
   await stock.save({ session });
   return stock;
 }
-
 
 
 export async function reserveStock({ warehouseId, productId, variantId, qty }, session) {
