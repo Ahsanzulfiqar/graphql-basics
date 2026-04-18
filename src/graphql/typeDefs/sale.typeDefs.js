@@ -117,15 +117,15 @@ input SaleItemInput {
   salePrice: Float!
 }
 
+
+
 input CreateSaleInput {
   sellerId: ID!
   warehouseId: ID!
   invoiceNo: String
   customerName: String
   customerPhone: String
-  # courierName: data.courierName,
-  # trackingNo: data.trackingNo,
-  # trackingUrl: data.trackingUrl,
+  # courier:SaleCourierInput
   country:String
   city:String
   address: String

@@ -31,7 +31,7 @@ const getDateRange = (from, to) => {
   return { start, end };
 };
 
-const fillMissingDates = (trend, days = 30) => {ç
+const fillMissingDates = (trend, days = 30) => {
   const map = new Map(trend.map((x) => [x.label, x.amount]));
   const result = [];
 
@@ -48,6 +48,7 @@ const fillMissingDates = (trend, days = 30) => {ç
     const day = String(d.getDate()).padStart(2, "0");
 
     const label = `${y}-${m}-${day}`;
+
     result.push({
       label,
       amount: Number(map.get(label) || 0),
