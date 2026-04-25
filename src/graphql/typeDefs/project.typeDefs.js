@@ -9,6 +9,7 @@ const projectTypeDefs =  gql`
   GetProjectById(_id: ID!): Project
   GetAllCouriers: [Courier!]!
   GetCourierById(_id: ID!): Courier
+   GetProjectsBySeller(sellerId: ID!): [Project]
 }
 
  type Mutation {
@@ -35,6 +36,9 @@ type Project {
   createdAt: String
   updatedAt: String
 }
+
+
+
 
 input CreateProjectInput {
   name: String!

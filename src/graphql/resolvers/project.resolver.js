@@ -3,6 +3,7 @@ import WAREHOUSE from '../../models/warehouse.js';
 import USER from "../../models/User.js";
 import COURIER from "../../models/Courier.js";
 import {  requireRoles  } from "../../auth/permissions/permissions.js";
+import mongoose from "mongoose";
 
 import { AuthenticationError, ForbiddenError, UserInputError ,ApolloError} from "apollo-server-express";
 
@@ -32,6 +33,18 @@ export default {
       requireRoles(ctx, ["ADMIN", "MANAGER"]);
       return PROJECT.findById(_id);
     },
+
+        GetProjectsBySeller: async (_, { sellerId }) => {
+      const projects = await PROJECT.find({
+        sellers: new mongoose.Types.ObjectId(sellerId),
+        isActive: true,
+      })
+        .populate("warehouses")
+        .populate("sellers");
+
+      return projects;
+    },
+
 
     GetAllCouriers: async (_, __, ctx) => {
       try {
