@@ -86,6 +86,13 @@ const saleSchema = new Schema(
       ref: "seller",
       required: true,
     },
+    
+    project: {
+      type: Schema.Types.ObjectId,
+      ref: "project",
+      required: true,
+    },
+
     warehouse: {
       type: Schema.Types.ObjectId,
       ref: "warehouse",
@@ -270,5 +277,8 @@ saleSchema.index(
 saleSchema.index({ warehouse: 1, createdAt: 1, status: 1, isDeleted: 1 });
 saleSchema.index({ "payment.status": 1 });
 saleSchema.index({ "payment.balanceAmount": 1 });
+saleSchema.index({ project: 1 });
+saleSchema.index({ project: 1, warehouse: 1 });
+saleSchema.index({ project: 1, seller: 1 });
 
 export default model("sale", saleSchema);

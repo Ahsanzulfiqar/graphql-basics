@@ -33,7 +33,7 @@ type Product {
   barcode: String
   description: String
   category: String!
-  subCategory: String!
+  subCategory: String
   purchasePrice: Float!
   salePrice: Float!
   attributes: [Attribute]
@@ -90,7 +90,7 @@ input CreateProductInput {
   barcode: String
   description: String
   category: String!
-  subCategory: String!
+  subCategory: String
   purchasePrice: Float!
   salePrice: Float!
   attributes: [AttributeInput]

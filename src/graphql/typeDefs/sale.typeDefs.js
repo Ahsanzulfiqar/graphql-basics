@@ -3,15 +3,14 @@ import { gql } from 'graphql-tag';
 const saleTypeDefs = gql `
 
 
- type Query {
+type Query {
   FilterSales(filter: SaleFilterInput, page: Int = 1, limit: Int = 20): SalePage!
   GetSaleById(id: ID!): Sale!
   GetAllSales(page: Int = 1, limit: Int = 20): SalePage!
-  GetSalesSummaryBySeller(sellerId: ID, dateFrom: Date, dateTo: Date): [SellerSalesSummary!]!
-,}
+  GetSalesSummaryBySeller(sellerId: ID, projectId: ID, dateFrom: Date, dateTo: Date): [SellerSalesSummary!]!
+}
 
-
- type Mutation {
+type Mutation {
   CreateSale(data: CreateSaleInput!): Sale!
   ConfirmSale(saleId: ID!): Sale!
   MarkOutForDelivery(saleId: ID!, data: OutForDeliveryInput!): Sale!
@@ -19,7 +18,7 @@ const saleTypeDefs = gql `
   CancelSale(saleId: ID!): Boolean!
   ReturnSale(saleId: ID!): Sale!
   MarkSalePaid(saleId: ID!, payment: PaymentInput!): Sale!
-},
+}
 
 
 scalar Date
@@ -52,35 +51,33 @@ type SaleItem {
 }
 
 type Sale {
+
   _id: ID!
+  project: ID!
   seller: ID!
   warehouse: ID!
   invoiceNo: String
   customerName: String
   customerPhone: String
-  country:String
-  city:String
+  country: String
+  city: String
   address: String
-
-# ✅ New courier object
   courier: SaleCourier
   deliveryNotes: String
   shippedAt: Date
-
   status: String!
   items: [SaleItem!]!
-
   subTotal: Float!
   taxAmount: Float!
   totalAmount: Float!
-
   statusTimestamps: SaleStatusTimestamps
   statusHistory: [SaleStatusHistory!]!
-
   createdAt: Date!
   updatedAt: Date!
-   payment: PaymentInfo
+  payment: PaymentInfo
+
 }
+
 
 type SalePage {
   data: [Sale!]!
@@ -120,19 +117,22 @@ input SaleItemInput {
 
 
 input CreateSaleInput {
+  projectId: ID!
   sellerId: ID!
   warehouseId: ID!
   invoiceNo: String
   customerName: String
   customerPhone: String
-  # courier:SaleCourierInput
-  country:String
-  city:String
+  country: String
+  city: String
   address: String
   items: [SaleItemInput!]!
   taxAmount: Float
   notes: String
+  payment: PaymentInput
 }
+
+
 
 
 
@@ -148,6 +148,7 @@ input CreateSaleInput {
 
 
 input SaleFilterInput {
+  projectId: ID
   sellerId: ID
   warehouseId: ID
   status: String
@@ -168,13 +169,16 @@ type PaymentInfo {
   status: String!
   mode: String
   bankAccount: String
+  paidAmount: Float
+  balanceAmount: Float
   paidAt: Date
 }
 
 input PaymentInput {
-  status: String # unpaid | paid
-  mode: String   # COD | ONLINE
+  status: String
+  mode: String
   bankAccount: String
+  paidAmount: Float
 }
 
 `

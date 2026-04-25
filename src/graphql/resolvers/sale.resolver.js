@@ -11,7 +11,7 @@ import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
 import { reserveStock, releaseReservedStock,addBackToBatch } from "../../services/stock.helpers.js";
 import { fifoConsume } from "../../services/fifoConsume.js";
 import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
-
+import PROJECT from "../../models/Project.js";
 
 
 function pushHistory(sale, { status, by, note }) {
@@ -67,41 +67,61 @@ function pushHistory(sale, { status, by, note }) {
       return sale;
     },
 
-    GetSalesSummaryBySeller: async (_, { sellerId, dateFrom, dateTo }) => {
-      const match = { isDeleted: { $ne: true }, status: "shipped" };
-      if (sellerId) match.seller = new mongoose.Types.ObjectId(sellerId);
+  GetSalesSummaryBySeller: async (_, { projectId, sellerId, dateFrom, dateTo }) => {
+  const match = {
+    isDeleted: { $ne: true },
+    status: "delivered",
+  };
 
-      if (dateFrom || dateTo) {
-        match.createdAt = {};
-        if (dateFrom) match.createdAt.$gte = new Date(dateFrom);
-        if (dateTo) {
-          const end = new Date(dateTo);
-          end.setHours(23, 59, 59, 999);
-          match.createdAt.$lte = end;
-        }
-      }
+  if (projectId) {
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      throw new UserInputError("Invalid projectId");
+    }
+    match.project = new mongoose.Types.ObjectId(projectId);
+  }
 
-      const rows = await SALE.aggregate([
-        { $match: match },
-        {
-          $group: {
-            _id: "$seller",
-            totalSales: { $sum: "$totalAmount" },
-            totalOrders: { $sum: 1 },
-          },
-        },
-        {
-          $project: {
-            seller: "$_id",
-            totalSales: 1,
-            totalOrders: 1,
-            _id: 0,
-          },
-        },
-      ]);
+  if (sellerId) {
+    if (!mongoose.Types.ObjectId.isValid(sellerId)) {
+      throw new UserInputError("Invalid sellerId");
+    }
+    match.seller = new mongoose.Types.ObjectId(sellerId);
+  }
 
-      return rows;
+  if (dateFrom || dateTo) {
+    match.createdAt = {};
+
+    if (dateFrom) {
+      match.createdAt.$gte = new Date(dateFrom);
+    }
+
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      match.createdAt.$lte = end;
+    }
+  }
+
+  const rows = await SALE.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: "$seller",
+        totalSales: { $sum: "$totalAmount" },
+        totalOrders: { $sum: 1 },
+      },
     },
+    {
+      $project: {
+        seller: "$_id",
+        totalSales: 1,
+        totalOrders: 1,
+        _id: 0,
+      },
+    },
+  ]);
+
+  return rows;
+},
 
         GetAllSales: async (_, { page = 1, limit = 20 }) => {
       try {
@@ -256,6 +276,11 @@ CreateSale: async (_, { data }, ctx) => {
     if (!mongoose.Types.ObjectId.isValid(data.sellerId)) {
       throw new UserInputError("Invalid sellerId");
     }
+
+    if (!mongoose.Types.ObjectId.isValid(data.projectId)) {
+  throw new UserInputError("Invalid projectId");
+}
+
     if (!mongoose.Types.ObjectId.isValid(data.warehouseId)) {
       throw new UserInputError("Invalid warehouseId");
     }
@@ -265,6 +290,15 @@ CreateSale: async (_, { data }, ctx) => {
       isDeleted: { $ne: true },
     }).session(session);
     if (!seller) throw new UserInputError("Seller not found");
+
+    const project = await PROJECT.findOne({
+  _id: data.projectId,
+  isActive: true,
+}).session(session);
+
+if (!project) {
+  throw new UserInputError("Project not found or inactive");
+}
 
     const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
     if (!warehouse) throw new UserInputError("Warehouse not found");
@@ -428,6 +462,7 @@ CreateSale: async (_, { data }, ctx) => {
       [
         {
           seller: data.sellerId,
+          project: data.projectId,
           warehouse: data.warehouseId,
           invoiceNo: data.invoiceNo,
           customerName: data.customerName,
