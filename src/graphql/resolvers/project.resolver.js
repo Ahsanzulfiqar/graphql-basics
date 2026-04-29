@@ -98,7 +98,7 @@ export default {
   Mutation: {
     CreateProject: async (_, { data }, ctx) => {
      
-      requireRoles(ctx, ["ADMIN", "MANAGER"]);
+      requireRoles(ctx, ["ADMIN", "MANAGER","SELLER"]);
 
       await validateWarehouses(data.warehouseIds);
       await validateUsers(data.sellerIds);
