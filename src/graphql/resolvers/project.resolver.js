@@ -30,7 +30,7 @@ export default {
     },
 
     GetProjectById: async (_, { _id }, ctx) => {
-      requireRoles(ctx, ["ADMIN", "MANAGER"]);
+      requireRoles(ctx, ["ADMIN", "MANAGER","SELLER"]);
       return PROJECT.findById(_id);
     },
 
