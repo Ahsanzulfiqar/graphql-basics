@@ -164,6 +164,79 @@ GetWarehouseStock: async (_, { filter = {}, page = 1, limit = 50 }, ctx) => {
     return stock.batches;
   },
 
+GetWarehouseStockById: async (_, { id }) => {
+  try {
+    // ✅ Validate ID format
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new UserInputError("Invalid warehouse stock ID");
+    }
+
+    const r = await WAREHOUSE_STOCK.findById(id)
+      .populate("warehouse", "_id name")
+      .populate("product", "_id name sku")
+      .populate("variant", "_id name sku")
+      .lean();
+
+    // ✅ Not found
+    if (!r) {
+      throw new UserInputError("Warehouse stock not found");
+    }
+
+    // ✅ Safe ID extraction
+    const warehouseId = r.warehouse?._id
+      ? String(r.warehouse._id)
+      : r.warehouse
+      ? String(r.warehouse)
+      : null;
+
+    const productId = r.product?._id
+      ? String(r.product._id)
+      : r.product
+      ? String(r.product)
+      : null;
+
+    const variantId = r.variant?._id
+      ? String(r.variant._id)
+      : r.variant
+      ? String(r.variant)
+      : null;
+
+    return {
+      _id: String(r._id),
+
+      warehouse: warehouseId,
+      product: productId,
+      variant: variantId,
+
+      warehouseName: r.warehouse?.name || null,
+      productName: r.product?.name || null,
+      variantName: r.variant?.name || null,
+
+      quantity: r.quantity ?? 0,
+      reserved: r.reserved ?? 0,
+      reorderLevel: r.reorderLevel ?? 0,
+      avgCost: r.avgCost ?? 0,
+
+      batches: r.batches || [],
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
+  } catch (error) {
+    console.error("❌ GetWarehouseStockById Error:", error);
+
+    // ✅ Known errors (don’t wrap again)
+    if (error instanceof UserInputError) {
+      throw error;
+    }
+
+    // ✅ Unexpected errors
+    throw new ApolloError(
+      "Failed to fetch warehouse stock",
+      "INTERNAL_SERVER_ERROR"
+    );
+  }
+},
+
    
   },
   Mutation: {

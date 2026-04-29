@@ -7,13 +7,13 @@ const warehouseTypeDefs  = gql`
      GetWarehouseById(_id: ID!): warehouse
      GetWarehouseStock(filter: WarehouseStockFilterInput page: Int = 1 limit: Int = 50): WarehouseStockPage!
      GetWarehouseProductBatches(warehouseId: ID!, productId: ID!, variantId: ID): [WarehouseStockBatch!]!
-
+     GetWarehouseStockById(id: ID!): WarehouseStock
     }
 
 
     type Mutation {
     CreateWarehouse(data:CreateWarehouseInput): String!
-     UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
+    UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
 
     },
 
@@ -61,6 +61,8 @@ type WarehouseStockBatch {
   quantity: Int
 }
 
+
+
 type WarehouseStock {
   _id: ID!
   warehouse: ID!
@@ -72,6 +74,7 @@ type WarehouseStock {
   quantity: Int!
   reserved: Int!
   reorderLevel: Int!
+  avgCost: Float
   batches: [WarehouseStockBatch!]!
   createdAt: Date!
   updatedAt: Date!
