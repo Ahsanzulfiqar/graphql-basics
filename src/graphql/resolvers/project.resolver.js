@@ -96,28 +96,42 @@ export default {
   },
 
   Mutation: {
-    CreateProject: async (_, { data }, ctx) => {
-     
-      requireRoles(ctx, ["ADMIN", "MANAGER","SELLER"]);
+   CreateProject: async (_, { data }, ctx) => {
+  requireRoles(ctx, ["ADMIN", "MANAGER", "SELLER"]);
 
-      await validateWarehouses(data.warehouseIds);
-      await validateUsers(data.sellerIds);
+  await validateWarehouses(data.warehouseIds);
 
-      try {
-        const project = await PROJECT.create({
-          name: data.name,
-          channel: data.channel,
-          warehouses: data.warehouseIds,
-          sellers: data.sellerIds || [],
-          isActive: data.isActive ?? true,
-        });
-        return project;
-      } catch (err) {
-        console.error("CreateProject error:", err);
-        if (err.code === 11000) throw new UserInputError("Project name already exists");
-        throw new Error("Failed to create project");
-      }
-    },
+  let sellers = [];
+
+  // ✅ If SELLER → force assign himself
+  if (ctx.user.role === "SELLER") {
+    sellers = [ctx.user._id];
+  } else {
+    // ADMIN / MANAGER can assign manually
+    await validateUsers(data.sellerIds);
+    sellers = data.sellerIds || [];
+  }
+
+  try {
+    const project = await PROJECT.create({
+      name: data.name,
+      channel: data.channel,
+      warehouses: data.warehouseIds,
+      sellers: sellers,
+      isActive: data.isActive ?? true,
+    });
+
+    return project;
+  } catch (err) {
+    console.error("CreateProject error:", err);
+
+    if (err.code === 11000) {
+      throw new UserInputError("Project name already exists");
+    }
+
+    throw new Error("Failed to create project");
+  }
+},
 
     UpdateProject: async (_, { _id, data }, ctx) => {
       requireRoles(ctx, ["ADMIN", "MANAGER"]);
