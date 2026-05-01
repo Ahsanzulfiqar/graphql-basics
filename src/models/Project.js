@@ -3,21 +3,18 @@ const { Schema, model } = mongoose;
 
 const projectSchema = new Schema(
   {
-    // Store / Project name
     name: {
       type: String,
       required: true,
-      trim: true, // e.g. "HerbalsDubai Shopify"
+      trim: true,
     },
 
-    // Sales channel
     channel: {
       type: String,
       required: true,
-      trim: true, // Shopify / Amazon / Noon
+      trim: true,
     },
 
-    // 🏬 Warehouses allowed for this project
     warehouses: [
       {
         type: Schema.Types.ObjectId,
@@ -26,13 +23,12 @@ const projectSchema = new Schema(
       },
     ],
 
-    // 👥 Sellers allowed to sell on this project
-    sellers: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: "User",
-      },
-    ],
+    // ✅ Single seller only
+    seller: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
 
     isActive: {
       type: Boolean,
@@ -42,11 +38,8 @@ const projectSchema = new Schema(
   { timestamps: true }
 );
 
-// Unique project name
 projectSchema.index({ name: 1 }, { unique: true });
-
-// Helpful indexes
-projectSchema.index({ sellers: 1 });
+projectSchema.index({ seller: 1 });
 projectSchema.index({ warehouses: 1 });
 
 export default model("project", projectSchema);

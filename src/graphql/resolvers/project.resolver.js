@@ -16,34 +16,56 @@ const validateWarehouses = async (warehouseIds) => {
   if (count !== warehouseIds.length) throw new UserInputError("One or more warehouses not found");
 };
 
-const validateUsers = async (userIds) => {
-  if (!userIds || userIds.length === 0) return;
-  const count = await USER.countDocuments({ _id: { $in: userIds } });
-  if (count !== userIds.length) throw new UserInputError("One or more users not found");
+const validateUser = async (userId) => {
+  if (!userId) return;
+
+  const user = await USER.findById(userId);
+  if (!user) {
+    throw new UserInputError("Seller not found");
+  }
 };
 
 export default {
   Query: {
-    GetAllProjects: async (_, __, ctx) => {
-      requireRoles(ctx, ["ADMIN", "MANAGER"]);
-      return PROJECT.find().sort({ createdAt: -1 });
-    },
+GetAllProjects: async (_, __, ctx) => {
+  try {
+    requireRoles(ctx, ["ADMIN", "MANAGER"]);
+
+    const projects = await PROJECT.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return projects.map((p) => ({
+      ...p,
+      _id: String(p._id),
+      warehouses: p.warehouses || [],
+      seller: p.seller ? String(p.seller) : null,
+      isActive: p.isActive ?? true,
+    }));
+  } catch (err) {
+    console.error("GetAllProjects error:", err);
+
+    if (err instanceof AuthenticationError || err instanceof ForbiddenError) {
+      throw err;
+    }
+
+    throw new ApolloError("Failed to fetch projects");
+  }
+},
 
     GetProjectById: async (_, { _id }, ctx) => {
       requireRoles(ctx, ["ADMIN", "MANAGER","SELLER"]);
       return PROJECT.findById(_id);
     },
 
-        GetProjectsBySeller: async (_, { sellerId }) => {
-      const projects = await PROJECT.find({
-        sellers: new mongoose.Types.ObjectId(sellerId),
-        isActive: true,
-      })
-        .populate("warehouses")
-        .populate("sellers");
+   GetProjectsBySeller: async (_, { sellerId }, ctx) => {
+  requireRoles(ctx, ["ADMIN", "MANAGER", "SELLER"]);
 
-      return projects;
-    },
+  return await PROJECT.find({
+    seller: sellerId,
+    isActive: true,
+  }).sort({ createdAt: -1 });
+},
 
 
     GetAllCouriers: async (_, __, ctx) => {
@@ -96,20 +118,18 @@ export default {
   },
 
   Mutation: {
-   CreateProject: async (_, { data }, ctx) => {
+CreateProject: async (_, { data }, ctx) => {
   requireRoles(ctx, ["ADMIN", "MANAGER", "SELLER"]);
 
   await validateWarehouses(data.warehouseIds);
 
-  let sellers = [];
+  let sellerId = null;
 
-  // ✅ If SELLER → force assign himself
   if (ctx.user.role === "SELLER") {
-    sellers = [ctx.user._id];
+    sellerId = ctx.user._id;
   } else {
-    // ADMIN / MANAGER can assign manually
-    await validateUsers(data.sellerIds);
-    sellers = data.sellerIds || [];
+    sellerId = data.sellerId || null;
+    await validateUser(sellerId);
   }
 
   try {
@@ -117,7 +137,7 @@ export default {
       name: data.name,
       channel: data.channel,
       warehouses: data.warehouseIds,
-      sellers: sellers,
+      seller: sellerId,
       isActive: data.isActive ?? true,
     });
 
@@ -129,38 +149,55 @@ export default {
       throw new UserInputError("Project name already exists");
     }
 
-    throw new Error("Failed to create project");
+    throw new ApolloError("Failed to create project");
   }
 },
 
-    UpdateProject: async (_, { _id, data }, ctx) => {
-      requireRoles(ctx, ["ADMIN", "MANAGER"]);
-console.log("")
-      if (data.warehouseIds !== undefined) await validateWarehouses(data.warehouseIds);
-      if (data.sellerIds !== undefined) await validateUsers(data.sellerIds);
+  UpdateProject: async (_, { _id, data }, ctx) => {
+  requireRoles(ctx, ["ADMIN", "MANAGER"]);
 
-      try {
-        const update = {};
-        if (data.name !== undefined) update.name = data.name;
-        if (data.channel !== undefined) update.channel = data.channel;
-        if (data.warehouseIds !== undefined) update.warehouses = data.warehouseIds;
-        if (data.sellerIds !== undefined) update.sellers = data.sellerIds;
-        if (data.isActive !== undefined) update.isActive = data.isActive;
+  if (data.warehouseIds !== undefined) {
+    await validateWarehouses(data.warehouseIds);
+  }
 
-        const updated = await PROJECT.findByIdAndUpdate(
-          _id,
-          { $set: update },
-          { new: true, runValidators: true }
-        );
+  if (data.sellerId !== undefined) {
+    await validateUser(data.sellerId);
+  }
 
-        if (!updated) throw new UserInputError("Project not found");
-        return updated;
-      } catch (err) {
-        console.error("UpdateProject error:", err);
-        if (err.code === 11000) throw new UserInputError("Project name already exists");
-        throw new Error("Failed to update project");
-      }
-    },
+  try {
+    const update = {};
+
+    if (data.name !== undefined) update.name = data.name;
+    if (data.channel !== undefined) update.channel = data.channel;
+    if (data.warehouseIds !== undefined) update.warehouses = data.warehouseIds;
+    if (data.sellerId !== undefined) update.seller = data.sellerId || null;
+    if (data.isActive !== undefined) update.isActive = data.isActive;
+
+    const updated = await PROJECT.findByIdAndUpdate(
+      _id,
+      { $set: update },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+      throw new UserInputError("Project not found");
+    }
+
+    return updated;
+  } catch (err) {
+    console.error("UpdateProject error:", err);
+
+    if (err.code === 11000) {
+      throw new UserInputError("Project name already exists");
+    }
+
+    if (err instanceof UserInputError) {
+      throw err;
+    }
+
+    throw new ApolloError("Failed to update project");
+  }
+},
 
     DeleteProject: async (_, { _id }, ctx) => {
       requireRoles(ctx, ["ADMIN"]); // recommended admin only
@@ -175,19 +212,23 @@ console.log("")
   
     },
 
-    AssignSellersToProject: async (_, { projectId, sellerIds }, ctx) => {
-      requireRoles(ctx, ["ADMIN", "MANAGER"]);
-      await validateUsers(sellerIds);
+  AssignSellerToProject: async (_, { projectId, sellerId }, ctx) => {
+  requireRoles(ctx, ["ADMIN", "MANAGER"]);
 
-      const updated = await PROJECT.findByIdAndUpdate(
-        projectId,
-        { $set: { sellers: sellerIds } },
-        { new: true }
-      );
+  await validateUser(sellerId);
 
-      if (!updated) throw new UserInputError("Project not found");
-      return updated;
-    },
+  const updated = await PROJECT.findByIdAndUpdate(
+    projectId,
+    { $set: { seller: sellerId || null } },
+    { new: true, runValidators: true }
+  );
+
+  if (!updated) {
+    throw new UserInputError("Project not found");
+  }
+
+  return updated;
+},
 
     SetProjectWarehouses: async (_, { projectId, warehouseIds }, ctx) => {
       requireRoles(ctx, ["ADMIN", "MANAGER"]);
