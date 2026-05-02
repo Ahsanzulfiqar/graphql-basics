@@ -1340,9 +1340,6 @@ MarkSalePaid: async (_, { saleId, payment }, ctx) => {
   }
 },
 
-
-
-
   },
 };
 

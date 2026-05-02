@@ -124,14 +124,14 @@ CreateProject: async (_, { data }, ctx) => {
   await validateWarehouses(data.warehouseIds);
 
   let sellerId = null;
-
+console.log(ctx,"ctx")
   if (ctx.user.role === "SELLER") {
-    sellerId = ctx.user._id;
+    sellerId = ctx.user.id;
   } else {
     sellerId = data.sellerId || null;
     await validateUser(sellerId);
   }
-
+ console.log(sellerId,"sellerId")
   try {
     const project = await PROJECT.create({
       name: data.name,
