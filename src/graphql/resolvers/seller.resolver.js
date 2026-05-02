@@ -25,33 +25,54 @@ const sellerResolvers = {
    
    
     Query: {
-    GetSellers: async (_, { search = "", page = 1, limit = 20 }) => {
-      try {
-        const q = { isDeleted: { $ne: true } };
 
-        if (search) {
-          const regex = { $regex: search, $options: "i" };
-          q.$or = [{ name: regex }, { email: regex }, { phone: regex }, { companyName: regex }];
-        }
+  GetSellers: async (_, { search = "", page = 1, limit = 20 }) => {
+  try {
+    
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safeLimit = Math.max(Number(limit) || 20, 1);
+    const skip = (safePage - 1) * safeLimit;
 
-        const skip = (Math.max(page, 1) - 1) * Math.max(limit, 1);
+    const q = {
+      isDeleted: { $ne: true },
+      role: "SELLER",
+    };
 
-        const [total, data] = await Promise.all([
-          SELLER.countDocuments(q),
-          SELLER.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit),
-        ]);
+    if (search?.trim()) {
+      const regex = { $regex: search.trim(), $options: "i" };
 
-        return {
-          data,
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit) || 1,
-        };
-      } catch (err) {
-        throw new ApolloError(err.message || "Failed to fetch sellers");
-      }
-    },
+      q.$or = [
+        { name: regex },
+        { email: regex },
+        { phone: regex },
+        { companyName: regex },
+      ];
+    }
+
+    const [total, data] = await Promise.all([
+      USER.countDocuments(q),
+      USER.find(q)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+    ]);
+
+    return {
+      data: data.map((u) => ({
+        ...u,
+        _id: String(u._id),
+      })),
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit) || 1,
+    };
+  } catch (err) {
+    console.error("GetSellers error:", err);
+    throw new ApolloError(err.message || "Failed to fetch sellers");
+  }
+},
 
     GetSellerById: async (_, { id }) => {
       const seller = await SELLER.findOne({ _id: id, isDeleted: { $ne: true } });

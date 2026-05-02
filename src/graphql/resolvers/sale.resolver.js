@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { ApolloError, UserInputError,AuthenticationError,ForbiddenError } from "apollo-server-express";
 import SALE from "../../models/Sale.js";
-import SELLER from "../../models/Seller.js";
+import USER from "../../models/User.js";
 import WAREHOUSE from "../../models/warehouse.js";
 import PRODUCT from "../../models/Product.js";
 import PRODUCT_VARIANT from "../../models/ProductVarient.js";
@@ -155,109 +155,8 @@ function pushHistory(sale, { status, by, note }) {
   },
 
   Mutation: {
-    //  CreateSale: async (_, { data }, ctx) => {
-
-    //   if (!ctx.user) throw new AuthenticationError("Login required");
-    //     const isInternal = ["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role);
-    //     const isSeller = ctx.user.role === "SELLER" || ctx.user.role ==="SALES";
 
 
-    //   const session = await mongoose.startSession();
-    //   session.startTransaction();
-    //   try {
-    //     // Validate seller + warehouse
-    //     const seller = await SELLER.findOne({ _id: data.sellerId, isDeleted: { $ne: true } }).session(session);
-    //     if (!seller) throw new UserInputError("Seller not found");
-
-    //     const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
-    //     if (!warehouse) throw new UserInputError("Warehouse not found");
-
-    //     if (!data.items || data.items.length === 0) throw new UserInputError("Sale items required");
-
-    //     // Validate products/variants exist (IDs)
-    //     const productIds = [...new Set(data.items.map((i) => i.productId))];
-    //     const variantIds = [...new Set(data.items.filter((i) => i.variantId).map((i) => i.variantId))];
-
-    //     const [products, variants] = await Promise.all([
-    //       PRODUCT.find({ _id: { $in: productIds } }).select("_id").session(session),
-    //       PRODUCT_VARIANT.find({ _id: { $in: variantIds } }).select("_id product").session(session),
-    //     ]);
-
-    //     if (products.length !== productIds.length) throw new UserInputError("One or more products not found");
-    //     if (variantIds.length && variants.length !== variantIds.length) throw new UserInputError("One or more variants not found");
-
-    //     // Optional: ensure each variant belongs to its product (recommended)
-    //     const variantMap = new Map(variants.map((v) => [String(v._id), String(v.product)]));
-    //     for (const it of data.items) {
-    //       if (it.variantId) {
-    //         const belongsTo = variantMap.get(String(it.variantId));
-    //         if (belongsTo && belongsTo !== String(it.productId)) {
-    //           throw new UserInputError("Variant does not belong to the given product");
-    //         }
-    //       }
-    //     }
-
-    //     // Build items + totals
-    //     const items = data.items.map((i) => {
-    //       const qty = Number(i.quantity);
-    //       const price = Number(i.salePrice);
-    //       const lineTotal = Number((qty * price).toFixed(2));
-
-    //       return {
-    //         product: i.productId,
-    //         variant: i.variantId,
-    //         productName: i.productName,
-    //         variantName: i.variantName,
-    //         sku: i.sku,
-    //         quantity: qty,
-    //         salePrice: price,
-    //         lineTotal,
-    //       };
-    //     });
-
-    //     const subTotal = Number(items.reduce((s, x) => s + x.lineTotal, 0).toFixed(2));
-    //     const taxAmount = Number((data.taxAmount || 0).toFixed(2));
-    //     const totalAmount = Number((subTotal + taxAmount).toFixed(2));
-
-    //     const [sale] = await SALE.create(
-    //       [
-    //         {
-    //           seller: data.sellerId,
-    //           warehouse: data.warehouseId,
-    //           invoiceNo: data.invoiceNo,
-    //           customerName: data.customerName,
-    //           customerPhone: data.customerPhone,
-    //           // courierName: data.courierName,
-    //           // trackingNo: data.trackingNo,
-    //           // trackingUrl: data.trackingUrl,
-    //           address: data.address,
-    //           status: data.status,
-    //           items,
-    //           subTotal,
-    //           taxAmount,
-    //           totalAmount,
-    //           notes: data.notes,
-    //           statusTimestamps: { draftAt: new Date() },
-    //           statusHistory: [
-    //             { status: data.status, at: new Date(), by: ctx?.user?._id, note: "Sale created" },
-    //           ],
-    //         },
-    //       ],
-    //       { session }
-    //     );
-
-    //     await session.commitTransaction();
-    //     session.endSession();
-    //     return sale;
-    //   } catch (err) {
-    //     await session.abortTransaction();
-    //     session.endSession();
-    //     // duplicate tracking/index etc.
-    //     if (err.code === 11000) throw new UserInputError("Duplicate value error");
-    //     throw new ApolloError(err.message || "Failed to create sale");
-    //   }
-    // },
-// CreateSale resolver (role-based status + optional-variant + reserve on confirmed)
 CreateSale: async (_, { data }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
 
@@ -285,11 +184,13 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError("Invalid warehouseId");
     }
 
-    const seller = await SELLER.findOne({
-      _id: data.sellerId,
-      isDeleted: { $ne: true },
-    }).session(session);
-    if (!seller) throw new UserInputError("Seller not found");
+const seller = await USER.findOne({
+  _id: data.sellerId,
+  isActive: { $ne: false },
+  role: { $in: ["SELLER", "SALES"] },
+}).session(session);
+
+if (!seller) throw new UserInputError("Seller user not found or inactive");
 
     const project = await PROJECT.findOne({
   _id: data.projectId,
@@ -522,39 +423,7 @@ if (!project) {
   }
 },
 
-    //   ConfirmSale: async (_, { saleId }, context) => {
-
-    //   const session = await mongoose.startSession();
-    //   session.startTransaction();
-    //   try {
-    //     const sale = await SALE.findById(saleId).session(session);
-    //     if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
-
-    //     if (sale.status !== "draft") throw new UserInputError("Only draft sale can be confirmed");
-
-    //     // Reserve each item
-    //     for (const it of sale.items) {
-    //       await reserveStock(
-    //         { warehouseId: sale.warehouse, productId: it.product, variantId: it.variant, qty: it.quantity },
-    //         session
-    //       );
-    //     }
-
-    //     sale.status = "confirmed";
-    //     pushHistory(sale, { status: "confirmed", by: context?.user?._id, note: "Sale confirmed (stock reserved)" });
-
-    //     await sale.save({ session });
-
-    //     await session.commitTransaction();
-    //     session.endSession();
-    //     return sale;
-    //   } catch (err) {
-    //     await session.abortTransaction();
-    //     session.endSession();
-    //     throw new ApolloError(err.message || "Failed to confirm sale");
-    //   }
-    // },
-
+  
 
     ConfirmSale: async (_, { saleId }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
@@ -646,39 +515,6 @@ if (!project) {
   }
 },
 
-
-    //   MarkOutForDelivery: async (_, { saleId, data }, context) => {
-    //   try {
-    //     const sale = await SALE.findById(saleId);
-    //     if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
-
-    //     if (sale.status !== "confirmed") {
-    //       throw new UserInputError("Only confirmed sale can be marked out for delivery");
-    //     }
-
-    //     if (!data?.courierName?.trim()) throw new UserInputError("courierName is required");
-    //     if (!data?.trackingNo?.trim()) throw new UserInputError("trackingNo is required");
-
-    //     sale.courierName = data.courierName.trim();
-    //     sale.trackingNo = data.trackingNo.trim();
-    //     sale.trackingUrl = data.trackingUrl?.trim();
-    //     sale.deliveryNotes = data.deliveryNotes?.trim();
-    //     sale.shippedAt = data.shippedAt ? new Date(data.shippedAt) : new Date();
-
-    //     sale.status = "out_for_delivery";
-    //     pushHistory(sale, {
-    //       status: "out_for_delivery",
-    //       by: context?.user?._id,
-    //       note: `Courier: ${sale.courierName}, Tracking: ${sale.trackingNo}`,
-    //     });
-
-    //     await sale.save();
-    //     return sale;
-    //   } catch (err) {
-    //     if (err.code === 11000) throw new UserInputError("Tracking number already exists");
-    //     throw new ApolloError(err.message || "Failed to mark out for delivery");
-    //   }
-    // },
 
     MarkOutForDelivery: async (_, { saleId, data }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
@@ -772,74 +608,6 @@ if (!project) {
   }
 },
 
-
-    //   MarkDelivered: async (_, { saleId }, context) => {
-    //   const session = await mongoose.startSession();
-    //   session.startTransaction();
-
-    //   try {
-    //     const sale = await SALE.findById(saleId).session(session);
-    //     if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
-
-    //     if (!["confirmed", "out_for_delivery"].includes(sale.status)) {
-    //       throw new UserInputError("Sale must be confirmed or out_for_delivery to mark delivered");
-    //     }
-
-    //     // Optional: require tracking before delivery if you want
-    //     // if (!sale.trackingNo) throw new UserInputError("Tracking number missing");
-
-    //     const ledgerDocs = [];
-
-    //     for (const it of sale.items) {
-    //       // release reserved now
-    //       await releaseReservedStock(
-    //         { warehouseId: sale.warehouse, productId: it.product, variantId: it.variant, qty: it.quantity },
-    //         session
-    //       );
-
-    //       // FIFO consume physical stock
-    //       const usedBatches = await fifoConsume(
-    //         { warehouseId: sale.warehouse, productId: it.product, variantId: it.variant, qty: it.quantity },
-    //         session
-    //       );
-
-    //       // Ledger OUT per batch
-    //       for (const b of usedBatches) {
-    //         ledgerDocs.push({
-    //           sale: sale._id, // ✅ recommended field in StockLedger
-    //           warehouse: sale.warehouse,
-    //           product: it.product,
-    //           variant: it.variant,
-
-    //           quantityIn: 0,
-    //           quantityOut: b.qtyUsed,
-
-    //           batchNo: b.batchNo,
-    //           expiryDate: b.expiryDate,
-
-    //           refType: "SALE",
-    //           refNo: sale.invoiceNo || String(sale._id),
-    //           notes: "Delivered sale (FIFO out)",
-    //         });
-    //       }
-    //     }
-
-    //     if (ledgerDocs.length) await STOCK_LEDGER.insertMany(ledgerDocs, { session });
-
-    //     sale.status = "delivered";
-    //     pushHistory(sale, { status: "delivered", by: context?.user?._id, note: "Sale delivered (stock consumed)" });
-
-    //     await sale.save({ session });
-
-    //     await session.commitTransaction();
-    //     session.endSession();
-    //     return sale;
-    //   } catch (err) {
-    //     await session.abortTransaction();
-    //     session.endSession();
-    //     throw new ApolloError(err.message || "Failed to mark delivered");
-    //   }
-    // },
 
     MarkDelivered: async (_, { saleId }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
@@ -957,44 +725,6 @@ if (!project) {
 
 
 
-    //   CancelSale: async (_, { saleId }, context) => {
-    //   const session = await mongoose.startSession();
-    //   session.startTransaction();
-
-    //   try {
-    //     const sale = await SALE.findById(saleId).session(session);
-    //     if (!sale || sale.isDeleted) return true;
-
-    //     if (sale.status === "delivered") {
-    //       throw new UserInputError("Cannot cancel delivered sale. Use ReturnSale.");
-    //     }
-    //     if (sale.status === "cancelled") return true;
-
-    //     // Release reserved if sale was confirmed/out_for_delivery
-    //     if (["confirmed", "out_for_delivery"].includes(sale.status)) {
-    //       for (const it of sale.items) {
-    //         await releaseReservedStock(
-    //           { warehouseId: sale.warehouse, productId: it.product, variantId: it.variant, qty: it.quantity },
-    //           session
-    //         );
-    //       }
-    //     }
-
-    //     sale.status = "cancelled";
-    //     pushHistory(sale, { status: "cancelled", by: context?.user?._id, note: "Sale cancelled" });
-
-    //     await sale.save({ session });
-
-    //     await session.commitTransaction();
-    //     session.endSession();
-    //     return true;
-    //   } catch (err) {
-    //     await session.abortTransaction();
-    //     session.endSession();
-    //     throw new ApolloError(err.message || "Failed to cancel sale");
-    //   }
-    // },
-
     CancelSale: async (_, { saleId }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
 
@@ -1085,84 +815,6 @@ if (!project) {
 },
 
 
-
-    //   ReturnSale: async (_, { saleId }, context) => {
-    //   const session = await mongoose.startSession();
-    //   session.startTransaction();
-
-    //   try {
-    //     const sale = await SALE.findById(saleId).session(session);
-    //     if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
-
-    //     if (sale.status !== "delivered") throw new UserInputError("Only delivered sale can be returned");
-
-    //     // Fetch SALE ledger lines for this sale
-    //     // Preferred: by sale field (recommended)
-    //     let saleOutRows = await STOCK_LEDGER.find({ refType: "SALE", sale: sale._id })
-    //       .session(session)
-    //       .lean();
-
-    //     // Fallback (if you didn't add sale field)
-    //     if (!saleOutRows.length) {
-    //       const refNo = sale.invoiceNo || String(sale._id);
-    //       saleOutRows = await StockLedger.find({ refType: "SALE", refNo }).session(session).lean();
-    //     }
-
-    //     if (!saleOutRows.length) throw new UserInputError("Sale ledger not found. Cannot return safely.");
-
-    //     const returnLedgerDocs = [];
-    //     const returnRef = `RET-${sale.invoiceNo || String(sale._id)}`;
-
-    //     for (const row of saleOutRows) {
-    //       const qty = Number(row.quantityOut || 0);
-    //       if (!qty) continue;
-
-    //       await addBackToBatch(
-    //         {
-    //           warehouseId: row.warehouse,
-    //           productId: row.product,
-    //           variantId: row.variant,
-    //           qty,
-    //           batchNo: row.batchNo,
-    //           expiryDate: row.expiryDate,
-    //         },
-    //         session
-    //       );
-
-    //       returnLedgerDocs.push({
-    //         sale: sale._id,
-    //         warehouse: row.warehouse,
-    //         product: row.product,
-    //         variant: row.variant,
-
-    //         quantityIn: qty,
-    //         quantityOut: 0,
-
-    //         batchNo: row.batchNo,
-    //         expiryDate: row.expiryDate,
-
-    //         refType: "SALE_RETURN",
-    //         refNo: returnRef,
-    //         notes: "Return against delivered sale",
-    //       });
-    //     }
-
-    //     if (returnLedgerDocs.length) await STOCK_LEDGER.insertMany(returnLedgerDocs, { session });
-
-    //     sale.status = "returned";
-    //     pushHistory(sale, { status: "returned", by: context?.user?._id, note: "Sale returned (stock added back)" });
-
-    //     await sale.save({ session });
-
-    //     await session.commitTransaction();
-    //     session.endSession();
-    //     return sale;
-    //   } catch (err) {
-    //     await session.abortTransaction();
-    //     session.endSession();
-    //     throw new ApolloError(err.message || "Failed to return sale");
-    //   }
-    // },
     ReturnSale: async (_, { saleId }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
 
