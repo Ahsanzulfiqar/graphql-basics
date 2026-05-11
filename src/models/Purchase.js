@@ -1,9 +1,6 @@
 import mongoose from "mongoose";
 const { Schema, model } = mongoose;
 
-/**
- * 🧩 Purchase item
- */
 const purchaseItemSchema = new Schema(
   {
     product: {
@@ -22,7 +19,6 @@ const purchaseItemSchema = new Schema(
     },
     variantName: {
       type: String,
-      required: false,
     },
     sku: {
       type: String,
@@ -34,15 +30,17 @@ const purchaseItemSchema = new Schema(
       required: true,
       min: 1,
     },
+
     purchasePrice: {
       type: Number,
-      required: true,
+      required: false,
       min: 0,
     },
     lineTotal: {
       type: Number,
-      required: true,
+      required: false,
       min: 0,
+      default: 0,
     },
     batchNo: {
       type: String,
@@ -55,9 +53,6 @@ const purchaseItemSchema = new Schema(
   { _id: false }
 );
 
-/**
- * 🧾 Purchase schema
- */
 const purchaseSchema = new Schema(
   {
     supplierName: {
@@ -95,7 +90,7 @@ const purchaseSchema = new Schema(
 
     subTotal: {
       type: Number,
-      required: true,
+      default: 0,
       min: 0,
     },
     taxAmount: {
@@ -105,7 +100,7 @@ const purchaseSchema = new Schema(
     },
     totalAmount: {
       type: Number,
-      required: true,
+      default: 0,
       min: 0,
     },
 
@@ -119,7 +114,6 @@ const purchaseSchema = new Schema(
       default: false,
     },
 
-    // ✅ NEW payment block
     payment: {
       status: {
         type: String,
@@ -155,26 +149,33 @@ const purchaseSchema = new Schema(
   { timestamps: true }
 );
 
-/**
- * ✅ Payment defaults and calculations
- */
 purchaseSchema.pre("save", function (next) {
-  if (!this.payment) {
-    this.payment = {
-      status: "unpaid",
-      paidAmount: 0,
-      balanceAmount: this.totalAmount || 0,
-    };
-  }
-
   const totalAmount = Number(this.totalAmount || 0);
-  const paidAmount = Number(this.payment.paidAmount || 0);
+  const paidAmount = Number(this.payment?.paidAmount || 0);
 
-  this.payment.paidAmount = paidAmount;
-  this.payment.balanceAmount = Math.max(totalAmount - paidAmount, 0);
+  const balanceAmount = Math.max(totalAmount - paidAmount, 0);
 
-  this.payment.status =
-    this.payment.balanceAmount <= 0 ? "paid" : "unpaid";
+  this.payment = {
+    ...this.payment,
+    paidAmount,
+    balanceAmount,
+  };
+
+  // ✅ Draft purchase has no final amount yet, so keep unpaid
+  if (totalAmount <= 0) {
+    this.payment.status = "unpaid";
+    this.payment.paidAt = undefined;
+  } else {
+    this.payment.status = balanceAmount <= 0 ? "paid" : "unpaid";
+
+    if (this.payment.status === "paid" && !this.payment.paidAt) {
+      this.payment.paidAt = new Date();
+    }
+
+    if (this.payment.status === "unpaid") {
+      this.payment.paidAt = undefined;
+    }
+  }
 
   next();
 });

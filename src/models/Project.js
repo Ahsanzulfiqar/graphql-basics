@@ -26,7 +26,7 @@ const projectSchema = new Schema(
     // ✅ Single seller only
     seller: {
       type: Schema.Types.ObjectId,
-      ref: "User",
+      ref: "user",
       default: null,
     },
 
