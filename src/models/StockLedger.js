@@ -11,6 +11,12 @@ const stockLedgerSchema = new Schema(
     },
     // later you can add: sale, adjustment, transfer, etc.
 
+transfer: {
+  type: Schema.Types.ObjectId,
+  ref: "stockTransfer",
+},
+
+
     product: {
       type: Schema.Types.ObjectId,
       ref: "product",
@@ -48,12 +54,20 @@ const stockLedgerSchema = new Schema(
     },
 
     // 🧾 Why this movement happened
-    refType: {
-      type: String,
-      enum: ["PURCHASE", "SALE", "ADJUSTMENT", "SALE_RETURN", "OPENING"],
-      default: "PURCHASE",
-      index: true,
-    },
+   refType: {
+  type: String,
+  enum: [
+    "PURCHASE",
+    "SALE",
+    "ADJUSTMENT",
+    "SALE_RETURN",
+    "OPENING",
+    "TRANSFER_IN",
+    "TRANSFER_OUT",
+  ],
+  default: "PURCHASE",
+  index: true,
+},
     refNo: {
       type: String, // invoiceNo, adjustment code, etc.
       trim: true,

@@ -8,12 +8,17 @@ const warehouseTypeDefs  = gql`
      GetWarehouseStock(filter: WarehouseStockFilterInput page: Int = 1 limit: Int = 50): WarehouseStockPage!
      GetWarehouseProductBatches(warehouseId: ID!, productId: ID!, variantId: ID): [WarehouseStockBatch!]!
      GetWarehouseStockById(id: ID!): WarehouseStock
+     GetStockTransfers: [StockTransfer!]!
+    GetStockTransferById(id: ID!): StockTransfer
     }
 
 
     type Mutation {
     CreateWarehouse(data:CreateWarehouseInput): String!
     UpdateWarehouse(_id: ID!, data: UpdateWarehouseInput!): String!
+    CreateStockTransfer(data: CreateStockTransferInput!): StockTransfer!
+    ConfirmStockTransfer(id: ID!): StockTransfer!
+    CancelStockTransfer(id: ID!): StockTransfer!
 
     },
 
@@ -96,6 +101,65 @@ type WarehouseStockPage {
   limit: Int!
   totalPages: Int!
 }
+
+
+input CreateStockTransferInput {
+    fromWarehouse: ID!
+    toWarehouse: ID!
+    items: [StockTransferItemInput!]!
+    note: String
+  }
+
+input StockTransferItemInput {
+    product: ID!
+    variant: ID
+    quantity: Int!
+    batchNo: String
+    expiryDate: Date
+  }
+
+  type StockTransfer {
+  _id: ID!
+  transferNo: String
+
+  fromWarehouse: ID!
+  fromWarehouseName: String
+
+  toWarehouse: ID!
+  toWarehouseName: String
+
+  items: [StockTransferItem!]!
+
+  status: String!
+  note: String
+  createdBy: ID
+  confirmedBy: ID
+  confirmedAt: Date
+  createdAt: Date!
+  updatedAt: Date!
+}
+
+type StockTransferItem {
+  product: ID!
+  productName: String
+
+  variant: ID
+  variantName: String
+
+  quantity: Int!
+  batchNo: String
+  expiryDate: Date
+}
+
+
+  type StockTransferItem {
+    product: ID!
+    variant: ID
+    quantity: Int!
+    batchNo: String
+    expiryDate: Date
+  }
+
 
 `
 export default warehouseTypeDefs;

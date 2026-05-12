@@ -15,7 +15,47 @@ const { equals } = validator;
 // *Model
 import WAREHOUSE from "../../models/warehouse.js";
 import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
+import STOCK_TRANSFER from "../../models/StockTransfer.js";
+import STOCK_LEDGER from "../../models/StockLedger.js";
+
+
 import mongoose from "mongoose";
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const requireRoles = (ctx, roles = []) => {
+  if (!ctx.user) {
+    throw new AuthenticationError("Login required");
+  }
+
+  if (ctx.user.isActive === false) {
+    throw new ForbiddenError("User is inactive");
+  }
+
+  if (!roles.includes(ctx.user.role)) {
+    throw new ForbiddenError("Not allowed");
+  }
+};
+
+const handleError = (error, resolverName) => {
+  console.error(`❌ ${resolverName} Error:`, error);
+
+  if (
+    error instanceof AuthenticationError ||
+    error instanceof ForbiddenError ||
+    error instanceof UserInputError ||
+    error instanceof ApolloError
+  ) {
+    throw error;
+  }
+
+  throw new ApolloError("Something went wrong", "INTERNAL_SERVER_ERROR");
+};
+
+const generateTransferNo = () => {
+  return `TRF-${Date.now()}`;
+};
+
 
 
 
@@ -43,45 +83,6 @@ const warehouseResolvers = {
         throw new Error("Failed to get warehouse");
       }
     },
-  
-  // GetWarehouseStock: async (_, { filter = {}, page = 1, limit = 50 }, context) => {
-
-
-
-  //   const query = {};
-
-  //   if (filter.warehouseId) {
-  //     query.warehouse = new mongoose.Types.ObjectId(filter.warehouseId);
-  //   }
-
-  //   if (filter.productId) {
-  //     query.product = new mongoose.Types.ObjectId(filter.productId);
-  //   }
-
-  //   if (filter.variantId) {
-  //     query.variant = new mongoose.Types.ObjectId(filter.variantId);
-  //   }
-
-  //   const pageNum = Math.max(page, 1);
-  //   const pageSize = Math.max(limit, 1);
-  //   const skip = (pageNum - 1) * pageSize;
-
-  //   const [total, data] = await Promise.all([
-  //     WAREHOUSE_STOCK.countDocuments(query),
-  //     WAREHOUSE_STOCK.find(query)
-  //       .sort({ updatedAt: -1 })
-  //       .skip(skip)
-  //       .limit(pageSize)
-  //   ]);
-
-  //   return {
-  //     data,
-  //     total,
-  //     page: pageNum,
-  //     limit: pageSize,
-  //     totalPages: Math.ceil(total / pageSize) || 1
-  //   };
-  // },
 
 
 GetWarehouseStock: async (_, { filter = {}, page = 1, limit = 50 }, ctx) => {
@@ -237,6 +238,91 @@ GetWarehouseStockById: async (_, { id }) => {
   }
 },
 
+  GetStockTransfers: async (_, __, ctx) => {
+  try {
+    requireRoles(ctx, ["ADMIN", "MANAGER", "WAREHOUSE"]);
+
+    const rows = await STOCK_TRANSFER.find()
+      .populate("fromWarehouse", "_id name")
+      .populate("toWarehouse", "_id name")
+      .populate("items.product", "_id name")
+      .populate("items.variant", "_id name")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return rows.map((r) => ({
+      _id: String(r._id),
+
+      transferNo: r.transferNo,
+
+      fromWarehouse: r.fromWarehouse?._id
+        ? String(r.fromWarehouse._id)
+        : String(r.fromWarehouse),
+
+      fromWarehouseName: r.fromWarehouse?.name || null,
+
+      toWarehouse: r.toWarehouse?._id
+        ? String(r.toWarehouse._id)
+        : String(r.toWarehouse),
+
+      toWarehouseName: r.toWarehouse?.name || null,
+
+      items: (r.items || []).map((item) => ({
+        product: item.product?._id
+          ? String(item.product._id)
+          : String(item.product),
+
+        productName: item.product?.name || null,
+
+        variant: item.variant?._id
+          ? String(item.variant._id)
+          : item.variant
+          ? String(item.variant)
+          : null,
+
+        variantName: item.variant?.name || null,
+
+        quantity: item.quantity || 0,
+
+        batchNo: item.batchNo || null,
+        expiryDate: item.expiryDate || null,
+      })),
+
+      status: r.status,
+      note: r.note,
+
+      createdBy: r.createdBy ? String(r.createdBy) : null,
+      confirmedBy: r.confirmedBy ? String(r.confirmedBy) : null,
+
+      confirmedAt: r.confirmedAt,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+  } catch (error) {
+    handleError(error, "GetStockTransfers");
+  }
+},
+
+    GetStockTransferById: async (_, { id }, ctx) => {
+      try {
+        requireRoles(ctx, ["ADMIN", "MANAGER", "WAREHOUSE"]);
+
+        if (!isValidObjectId(id)) {
+          throw new UserInputError("Invalid transfer ID");
+        }
+
+        const transfer = await STOCK_TRANSFER.findById(id).lean();
+
+        if (!transfer) {
+          throw new UserInputError("Stock transfer not found");
+        }
+
+        return transfer;
+      } catch (error) {
+        handleError(error, "GetStockTransferById");
+      }
+    },
+
    
   },
   Mutation: {
@@ -288,7 +374,278 @@ GetWarehouseStockById: async (_, { id }) => {
     },
     
 
+     CreateStockTransfer: async (_, { data }, ctx) => {
+      try {
+        requireRoles(ctx, ["ADMIN", "MANAGER", "WAREHOUSE"]);
 
+        if (!isValidObjectId(data.fromWarehouse)) {
+          throw new UserInputError("Invalid from warehouse");
+        }
+
+        if (!isValidObjectId(data.toWarehouse)) {
+          throw new UserInputError("Invalid to warehouse");
+        }
+
+        if (String(data.fromWarehouse) === String(data.toWarehouse)) {
+          throw new UserInputError("From warehouse and to warehouse cannot be same");
+        }
+
+        if (!data.items || data.items.length === 0) {
+          throw new UserInputError("Transfer items are required");
+        }
+
+        for (const item of data.items) {
+          if (!isValidObjectId(item.product)) {
+            throw new UserInputError("Invalid product ID");
+          }
+
+          if (item.variant && !isValidObjectId(item.variant)) {
+            throw new UserInputError("Invalid variant ID");
+          }
+
+          if (!item.quantity || Number(item.quantity) <= 0) {
+            throw new UserInputError("Quantity must be greater than 0");
+          }
+        }
+
+        const transfer = await STOCK_TRANSFER.create({
+          transferNo: generateTransferNo(),
+          fromWarehouse: data.fromWarehouse,
+          toWarehouse: data.toWarehouse,
+          items: data.items.map((item) => ({
+            product: item.product,
+            variant: item.variant || undefined,
+            quantity: Number(item.quantity),
+            batchNo: item.batchNo || undefined,
+            expiryDate: item.expiryDate || undefined,
+          })),
+          note: data.note,
+          status: "draft",
+          createdBy: ctx.user._id,
+        });
+
+        return transfer;
+      } catch (error) {
+        handleError(error, "CreateStockTransfer");
+      }
+    },
+
+     ConfirmStockTransfer: async (_, { id }, ctx) => {
+      const session = await mongoose.startSession();
+      session.startTransaction();
+
+      try {
+        requireRoles(ctx, ["ADMIN", "MANAGER", "WAREHOUSE"]);
+
+        if (!isValidObjectId(id)) {
+          throw new UserInputError("Invalid transfer ID");
+        }
+
+        const transfer = await STOCK_TRANSFER.findById(id).session(session);
+
+        if (!transfer) {
+          throw new UserInputError("Stock transfer not found");
+        }
+
+        if (transfer.status !== "draft") {
+          throw new UserInputError("Only draft transfer can be confirmed");
+        }
+
+        for (const item of transfer.items) {
+          const qty = Number(item.quantity || 0);
+
+          if (qty <= 0) {
+            throw new UserInputError("Transfer quantity must be greater than 0");
+          }
+
+          const sourceStock = await WAREHOUSE_STOCK.findOne({
+            warehouse: transfer.fromWarehouse,
+            product: item.product,
+            variant: item.variant || undefined,
+          }).session(session);
+
+          if (!sourceStock) {
+            throw new UserInputError("Source warehouse stock not found");
+          }
+
+          const availableQty =
+            Number(sourceStock.quantity || 0) -
+            Number(sourceStock.reserved || 0);
+
+          if (availableQty < qty) {
+            throw new UserInputError(
+              `Insufficient stock. Available: ${availableQty}, Required: ${qty}`
+            );
+          }
+
+          const sourceAvgCost = Number(sourceStock.avgCost || 0);
+
+          // ✅ Deduct from source warehouse
+          sourceStock.quantity = Number(sourceStock.quantity || 0) - qty;
+
+          // ✅ Batch deduction from source
+          if (item.batchNo) {
+            const sourceBatch = sourceStock.batches.find(
+              (b) => String(b.batchNo) === String(item.batchNo)
+            );
+
+            if (!sourceBatch) {
+              throw new UserInputError(`Batch ${item.batchNo} not found in source warehouse`);
+            }
+
+            if (Number(sourceBatch.quantity || 0) < qty) {
+              throw new UserInputError(
+                `Insufficient batch quantity. Batch available: ${sourceBatch.quantity}, Required: ${qty}`
+              );
+            }
+
+            sourceBatch.quantity = Number(sourceBatch.quantity || 0) - qty;
+
+            sourceStock.batches = sourceStock.batches.filter(
+              (b) => Number(b.quantity || 0) > 0
+            );
+          }
+
+          await sourceStock.save({ session });
+
+          // ✅ Find or create destination stock
+          let destinationStock = await WAREHOUSE_STOCK.findOne({
+            warehouse: transfer.toWarehouse,
+            product: item.product,
+            variant: item.variant || undefined,
+          }).session(session);
+
+          if (!destinationStock) {
+            destinationStock = new WAREHOUSE_STOCK({
+              warehouse: transfer.toWarehouse,
+              product: item.product,
+              variant: item.variant || undefined,
+              quantity: 0,
+              reserved: 0,
+              reorderLevel: 0,
+              avgCost: 0,
+              batches: [],
+            });
+          }
+
+          // ✅ Weighted average cost at destination
+          const oldQty = Number(destinationStock.quantity || 0);
+          const oldAvgCost = Number(destinationStock.avgCost || 0);
+
+          const incomingQty = qty;
+          const incomingAvgCost = sourceAvgCost;
+
+          const newTotalQty = oldQty + incomingQty;
+
+          if (newTotalQty > 0) {
+            destinationStock.avgCost =
+              (oldQty * oldAvgCost + incomingQty * incomingAvgCost) /
+              newTotalQty;
+          }
+
+          // ✅ Add quantity to destination
+          destinationStock.quantity = newTotalQty;
+
+          // ✅ Batch add to destination
+          if (item.batchNo) {
+            const destinationBatch = destinationStock.batches.find(
+              (b) => String(b.batchNo) === String(item.batchNo)
+            );
+
+            if (destinationBatch) {
+              destinationBatch.quantity =
+                Number(destinationBatch.quantity || 0) + qty;
+            } else {
+              destinationStock.batches.push({
+                batchNo: item.batchNo,
+                expiryDate: item.expiryDate || null,
+                quantity: qty,
+              });
+            }
+          }
+
+          await destinationStock.save({ session });
+
+          // ✅ Ledger OUT
+          await STOCK_LEDGER.create(
+            [
+              {
+                transfer: transfer._id,
+                product: item.product,
+                variant: item.variant || undefined,
+                warehouse: transfer.fromWarehouse,
+                quantityIn: 0,
+                quantityOut: qty,
+                batchNo: item.batchNo || undefined,
+                expiryDate: item.expiryDate || undefined,
+                refType: "TRANSFER_OUT",
+                refNo: transfer.transferNo,
+                notes: `Transferred out to warehouse ${transfer.toWarehouse}`,
+              },
+
+              // ✅ Ledger IN
+              {
+                transfer: transfer._id,
+                product: item.product,
+                variant: item.variant || undefined,
+                warehouse: transfer.toWarehouse,
+                quantityIn: qty,
+                quantityOut: 0,
+                batchNo: item.batchNo || undefined,
+                expiryDate: item.expiryDate || undefined,
+                refType: "TRANSFER_IN",
+                refNo: transfer.transferNo,
+                notes: `Transferred in from warehouse ${transfer.fromWarehouse}`,
+              },
+            ],
+            { session }
+          );
+        }
+
+        transfer.status = "transferred";
+        transfer.confirmedBy = ctx.user._id;
+        transfer.confirmedAt = new Date();
+
+        await transfer.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return transfer;
+      } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
+        handleError(error, "ConfirmStockTransfer");
+      }
+    },
+
+       CancelStockTransfer: async (_, { id }, ctx) => {
+      try {
+        requireRoles(ctx, ["ADMIN", "MANAGER", "WAREHOUSE"]);
+
+        if (!isValidObjectId(id)) {
+          throw new UserInputError("Invalid transfer ID");
+        }
+
+        const transfer = await STOCK_TRANSFER.findById(id);
+
+        if (!transfer) {
+          throw new UserInputError("Stock transfer not found");
+        }
+
+        if (transfer.status !== "draft") {
+          throw new UserInputError("Only draft transfer can be cancelled");
+        }
+
+        transfer.status = "cancelled";
+        await transfer.save();
+
+        return transfer;
+      } catch (error) {
+        handleError(error, "CancelStockTransfer");
+      }
+    },
   },
 
   Subscription: {
