@@ -152,6 +152,270 @@ function pushHistory(sale, { status, by, note }) {
       }
     },
 
+    AdminSalesDashboard: async (_, { filter = {} }, ctx) => {
+  if (!ctx.user) throw new AuthenticationError("Login required");
+
+  if (!["ADMIN", "MANAGER"].includes(ctx.user.role)) {
+    throw new ForbiddenError("Not allowed");
+  }
+
+  const match = {
+    isDeleted: { $ne: true },
+  };
+
+  if (filter.projectId) match.project = new mongoose.Types.ObjectId(filter.projectId);
+  if (filter.sellerId) match.seller = new mongoose.Types.ObjectId(filter.sellerId);
+  if (filter.warehouseId) match.warehouse = new mongoose.Types.ObjectId(filter.warehouseId);
+  if (filter.status) match.status = filter.status;
+  if (filter.paymentStatus) match["payment.status"] = filter.paymentStatus;
+  if (filter.paymentMode) match["payment.mode"] = filter.paymentMode;
+  if (filter.country) match.country = filter.country;
+  if (filter.city) match.city = filter.city;
+
+  if (filter.dateFrom || filter.dateTo) {
+    match.createdAt = {};
+
+    if (filter.dateFrom) {
+      match.createdAt.$gte = new Date(filter.dateFrom);
+    }
+
+    if (filter.dateTo) {
+      const end = new Date(filter.dateTo);
+      end.setHours(23, 59, 59, 999);
+      match.createdAt.$lte = end;
+    }
+  }
+
+  const [
+    summary,
+    statusBreakdown,
+    topSellers,
+    topProjects,
+    topProducts,
+    salesTrend,
+  ] = await Promise.all([
+    SALE.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalOrders: { $sum: 1 },
+          totalRevenue: { $sum: "$totalAmount" },
+          totalCost: { $sum: "$totalCost" },
+          netProfit: { $sum: "$grossProfit" },
+          paidAmount: { $sum: "$payment.paidAmount" },
+          balanceAmount: { $sum: "$payment.balanceAmount" },
+          codPending: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ["$payment.mode", "COD"] },
+                    { $ne: ["$payment.status", "paid"] },
+                  ],
+                },
+                "$payment.balanceAmount",
+                0,
+              ],
+            },
+          },
+          deliveredOrders: {
+            $sum: { $cond: [{ $eq: ["$status", "delivered"] }, 1, 0] },
+          },
+          cancelledOrders: {
+            $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] },
+          },
+          returnedOrders: {
+            $sum: { $cond: [{ $eq: ["$status", "returned"] }, 1, 0] },
+          },
+          pendingOrders: {
+            $sum: {
+              $cond: [
+                { $in: ["$status", ["draft", "confirmed", "out_for_delivery"]] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]),
+
+    SALE.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$status",
+          orders: { $sum: 1 },
+          revenue: { $sum: "$totalAmount" },
+        },
+      },
+      {
+        $project: {
+          status: "$_id",
+          orders: 1,
+          revenue: 1,
+          _id: 0,
+        },
+      },
+    ]),
+
+    SALE.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$seller",
+          revenue: { $sum: "$totalAmount" },
+          orders: { $sum: 1 },
+          profit: { $sum: "$grossProfit" },
+        },
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 5 },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "sellerData",
+        },
+      },
+      {
+        $project: {
+          seller: "$_id",
+          sellerName: { $ifNull: [{ $arrayElemAt: ["$sellerData.name", 0] }, "N/A"] },
+          revenue: 1,
+          orders: 1,
+          profit: 1,
+          _id: 0,
+        },
+      },
+    ]),
+
+    SALE.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$project",
+          revenue: { $sum: "$totalAmount" },
+          orders: { $sum: 1 },
+          profit: { $sum: "$grossProfit" },
+        },
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 5 },
+      {
+        $lookup: {
+          from: "projects",
+          localField: "_id",
+          foreignField: "_id",
+          as: "projectData",
+        },
+      },
+      {
+        $project: {
+          project: "$_id",
+          projectName: { $ifNull: [{ $arrayElemAt: ["$projectData.name", 0] }, "N/A"] },
+          revenue: 1,
+          orders: 1,
+          profit: 1,
+          _id: 0,
+        },
+      },
+    ]),
+
+    SALE.aggregate([
+      { $match: match },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: "$items.product",
+          productName: { $first: "$items.productName" },
+          sku: { $first: "$items.sku" },
+          quantity: { $sum: "$items.quantity" },
+          revenue: { $sum: "$items.lineTotal" },
+          cost: { $sum: "$items.lineCost" },
+        },
+      },
+      {
+        $project: {
+          product: "$_id",
+          productName: 1,
+          sku: 1,
+          quantity: 1,
+          revenue: 1,
+          profit: { $subtract: ["$revenue", "$cost"] },
+          _id: 0,
+        },
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 5 },
+    ]),
+
+    SALE.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            $dateToString: {
+              format: "%Y-%m-%d",
+              date: "$createdAt",
+            },
+          },
+          revenue: { $sum: "$totalAmount" },
+          orders: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          date: "$_id",
+          revenue: 1,
+          orders: 1,
+          _id: 0,
+        },
+      },
+      { $sort: { date: 1 } },
+    ]),
+  ]);
+
+  const s = summary[0] || {};
+
+  const totalOrders = s.totalOrders || 0;
+  const deliveredOrders = s.deliveredOrders || 0;
+  const returnedOrders = s.returnedOrders || 0;
+  const cancelledOrders = s.cancelledOrders || 0;
+
+  return {
+    totalRevenue: Number((s.totalRevenue || 0).toFixed(2)),
+    netProfit: Number((s.netProfit || 0).toFixed(2)),
+    totalOrders,
+    pendingOrders: s.pendingOrders || 0,
+    deliveredOrders,
+    cancelledOrders,
+    returnedOrders,
+    paidAmount: Number((s.paidAmount || 0).toFixed(2)),
+    balanceAmount: Number((s.balanceAmount || 0).toFixed(2)),
+    codPending: Number((s.codPending || 0).toFixed(2)),
+    averageOrderValue: deliveredOrders
+      ? Number(((s.totalRevenue || 0) / deliveredOrders).toFixed(2))
+      : 0,
+    deliveryRate: totalOrders
+      ? Number(((deliveredOrders / totalOrders) * 100).toFixed(2))
+      : 0,
+    returnRate: deliveredOrders
+      ? Number(((returnedOrders / deliveredOrders) * 100).toFixed(2))
+      : 0,
+    cancellationRate: totalOrders
+      ? Number(((cancelledOrders / totalOrders) * 100).toFixed(2))
+      : 0,
+    topSellers,
+    topProjects,
+    topProducts,
+    salesTrend,
+    statusBreakdown,
+  };
+},
+
   },
 
   Mutation: {
@@ -171,58 +435,93 @@ CreateSale: async (_, { data }, ctx) => {
   session.startTransaction();
 
   try {
-    // ---------- Validate seller + warehouse ----------
+    // ---------- Validate IDs ----------
+    if (!mongoose.Types.ObjectId.isValid(data.projectId)) {
+      throw new UserInputError("Invalid projectId");
+    }
+
     if (!mongoose.Types.ObjectId.isValid(data.sellerId)) {
       throw new UserInputError("Invalid sellerId");
     }
-
-    if (!mongoose.Types.ObjectId.isValid(data.projectId)) {
-  throw new UserInputError("Invalid projectId");
-}
 
     if (!mongoose.Types.ObjectId.isValid(data.warehouseId)) {
       throw new UserInputError("Invalid warehouseId");
     }
 
-const seller = await USER.findOne({
-  _id: data.sellerId,
-  isActive: { $ne: false },
-  role: { $in: ["SELLER", "SALES"] },
-}).session(session);
+    // ---------- Validate seller user ----------
+    const seller = await USER.findOne({
+      _id: data.sellerId,
+      isActive: { $ne: false },
+      role: { $in: ["SELLER", "SALES"] },
+    }).session(session);
 
-if (!seller) throw new UserInputError("Seller user not found or inactive");
+    if (!seller) {
+      throw new UserInputError("Seller user not found or inactive");
+    }
 
+    // ---------- Validate project ----------
     const project = await PROJECT.findOne({
-  _id: data.projectId,
-  isActive: true,
-}).session(session);
+      _id: data.projectId,
+      isActive: true,
+    }).session(session);
 
-if (!project) {
-  throw new UserInputError("Project not found or inactive");
+    if (!project) {
+      throw new UserInputError("Project not found or inactive");
+    }
+
+    // ---------- Validate warehouse ----------
+    const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
+
+    if (!warehouse) {
+      throw new UserInputError("Warehouse not found");
+    }
+
+    // ---------- Validate project warehouse ----------
+    const warehouseAllowed = project.warehouses.some(
+      (id) => String(id) === String(data.warehouseId)
+    );
+
+    if (!warehouseAllowed) {
+      throw new UserInputError("Warehouse not allowed in this project");
+    }
+
+    // ---------- Validate project seller ----------
+  
+
+    if (String(project.seller) !== String(data.sellerId)) {
+  throw new UserInputError("Seller not allowed in this project");
 }
 
-    const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
-    if (!warehouse) throw new UserInputError("Warehouse not found");
-
+    // ---------- Validate sale items ----------
     if (!data.items || data.items.length === 0) {
       throw new UserInputError("Sale items required");
     }
 
-    // ---------- Collect + validate IDs ----------
-    const productIds = [...new Set(data.items.map((i) => i.productId).filter(Boolean))];
-    const variantIds = [...new Set(data.items.map((i) => i.variantId).filter(Boolean))];
+    const productIds = [
+      ...new Set(data.items.map((i) => i.productId).filter(Boolean)),
+    ];
 
-    const badProducts = productIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+    const variantIds = [
+      ...new Set(data.items.map((i) => i.variantId).filter(Boolean)),
+    ];
+
+    const badProducts = productIds.filter(
+      (id) => !mongoose.Types.ObjectId.isValid(id)
+    );
+
     if (badProducts.length) {
       throw new UserInputError(`Invalid productId(s): ${badProducts.join(", ")}`);
     }
 
-    const badVariants = variantIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+    const badVariants = variantIds.filter(
+      (id) => !mongoose.Types.ObjectId.isValid(id)
+    );
+
     if (badVariants.length) {
       throw new UserInputError(`Invalid variantId(s): ${badVariants.join(", ")}`);
     }
 
-    // ---------- Ensure products/variants exist ----------
+    // ---------- Fetch products and variants ----------
     const [products, variants] = await Promise.all([
       PRODUCT.find({ _id: { $in: productIds } })
         .select("_id name sku")
@@ -246,21 +545,24 @@ if (!project) {
     const productMap = new Map(products.map((p) => [String(p._id), p]));
     const variantMap = new Map(variants.map((v) => [String(v._id), v]));
 
-    // ---------- Ensure each variant belongs to its product ----------
+    // ---------- Validate variant belongs to product ----------
     for (const it of data.items) {
       if (it.variantId) {
         const variantDoc = variantMap.get(String(it.variantId));
+
         if (variantDoc && String(variantDoc.product) !== String(it.productId)) {
           throw new UserInputError("Variant does not belong to the given product");
         }
       }
     }
 
-    // ---------- Fetch warehouse stock for cost snapshot ----------
+    // ---------- Fetch warehouse stock for avg cost snapshot ----------
     const stockQuery = data.items.map((i) => ({
       warehouse: new mongoose.Types.ObjectId(data.warehouseId),
       product: new mongoose.Types.ObjectId(i.productId),
-      ...(i.variantId ? { variant: new mongoose.Types.ObjectId(i.variantId) } : { variant: { $in: [null, undefined] } }),
+      ...(i.variantId
+        ? { variant: new mongoose.Types.ObjectId(i.variantId) }
+        : { variant: { $in: [null, undefined] } }),
     }));
 
     const stockDocs = await WAREHOUSE_STOCK.find({
@@ -271,66 +573,80 @@ if (!project) {
 
     const stockMap = new Map(
       stockDocs.map((s) => [
-        `${String(s.warehouse)}-${String(s.product)}-${s.variant ? String(s.variant) : "no-variant"}`,
+        `${String(s.warehouse)}-${String(s.product)}-${
+          s.variant ? String(s.variant) : "no-variant"
+        }`,
         s,
       ])
     );
 
-    // ---------- Build items ----------
+    // ---------- Build sale items with cost snapshot ----------
     const items = data.items.map((i, idx) => {
       const qty = Number(i.quantity);
       const price = Number(i.salePrice);
 
       if (!Number.isFinite(qty) || qty <= 0) {
-        throw new UserInputError(`Invalid quantity at item ${idx}`);
+        throw new UserInputError(`Invalid quantity at item ${idx + 1}`);
       }
 
       if (!Number.isFinite(price) || price < 0) {
-        throw new UserInputError(`Invalid salePrice at item ${idx}`);
+        throw new UserInputError(`Invalid salePrice at item ${idx + 1}`);
       }
 
       const productDoc = productMap.get(String(i.productId));
       const variantDoc = i.variantId ? variantMap.get(String(i.variantId)) : null;
 
-      const stockKey = `${String(data.warehouseId)}-${String(i.productId)}-${i.variantId ? String(i.variantId) : "no-variant"}`;
+      const stockKey = `${String(data.warehouseId)}-${String(i.productId)}-${
+        i.variantId ? String(i.variantId) : "no-variant"
+      }`;
+
       const stockDoc = stockMap.get(stockKey);
 
       const costPrice = Number(stockDoc?.avgCost || 0);
       const lineCost = Number((qty * costPrice).toFixed(2));
       const lineTotal = Number((qty * price).toFixed(2));
 
-      const doc = {
+      const itemDoc = {
         product: new mongoose.Types.ObjectId(i.productId),
         productName: i.productName || productDoc?.name || "",
         sku: i.sku || variantDoc?.sku || productDoc?.sku || "",
         quantity: qty,
         salePrice: price,
-
-        // ✅ NEW
         costPrice,
         lineCost,
-
         lineTotal,
       };
 
       if (i.variantId) {
-        doc.variant = new mongoose.Types.ObjectId(i.variantId);
-        doc.variantName = i.variantName || variantDoc?.name || "";
+        itemDoc.variant = new mongoose.Types.ObjectId(i.variantId);
+        itemDoc.variantName = i.variantName || variantDoc?.name || "";
       }
 
-      return doc;
+      return itemDoc;
     });
 
     // ---------- Totals ----------
-    const subTotal = Number(items.reduce((s, x) => s + x.lineTotal, 0).toFixed(2));
+    const subTotal = Number(
+      items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2)
+    );
+
     const taxAmount = Number((data.taxAmount || 0).toFixed(2));
+
     const totalAmount = Number((subTotal + taxAmount).toFixed(2));
 
-    // ---------- Payment block ----------
+    const totalCost = Number(
+      items.reduce((sum, item) => sum + Number(item.lineCost || 0), 0).toFixed(2)
+    );
+
+    const grossProfit = Number((subTotal - totalCost).toFixed(2));
+
+    // ---------- Payment ----------
     const paidAmount = Number(data?.payment?.paidAmount ?? 0);
+
     if (!Number.isFinite(paidAmount) || paidAmount < 0) {
       throw new UserInputError("Invalid payment.paidAmount");
     }
+
     if (paidAmount > totalAmount) {
       throw new UserInputError("payment.paidAmount cannot be greater than totalAmount");
     }
@@ -338,15 +654,25 @@ if (!project) {
     const balanceAmount = Number((totalAmount - paidAmount).toFixed(2));
     const paymentStatus = balanceAmount <= 0 ? "paid" : "unpaid";
 
-    // ---------- Role-based status ----------
+    // ---------- Role based status ----------
     const now = new Date();
     const status = isAdminManager ? "confirmed" : "draft";
 
-    const statusTimestamps = { draftAt: now };
-    if (status === "confirmed") statusTimestamps.confirmedAt = now;
+    const statusTimestamps = {
+      draftAt: now,
+    };
+
+    if (status === "confirmed") {
+      statusTimestamps.confirmedAt = now;
+    }
 
     const statusHistory = [
-      { status: "draft", at: now, by: ctx.user._id, note: "Sale created" },
+      {
+        status: "draft",
+        at: now,
+        by: ctx.user._id,
+        note: "Sale created",
+      },
     ];
 
     if (status === "confirmed") {
@@ -354,7 +680,7 @@ if (!project) {
         status: "confirmed",
         at: now,
         by: ctx.user._id,
-        note: "Auto-confirmed (created by admin/manager)",
+        note: "Auto-confirmed by admin/manager",
       });
     }
 
@@ -362,9 +688,10 @@ if (!project) {
     const [sale] = await SALE.create(
       [
         {
-          seller: data.sellerId,
           project: data.projectId,
+          seller: data.sellerId,
           warehouse: data.warehouseId,
+
           invoiceNo: data.invoiceNo,
           customerName: data.customerName,
           customerPhone: data.customerPhone,
@@ -374,22 +701,24 @@ if (!project) {
 
           status,
           items,
+
           subTotal,
           taxAmount,
           totalAmount,
+          totalCost,
+          grossProfit,
 
           notes: data.notes,
           statusTimestamps,
           statusHistory,
 
-          // ✅ NEW
           payment: {
             status: paymentStatus,
             mode: data?.payment?.mode || "COD",
             bankAccount: data?.payment?.bankAccount,
             paidAmount,
             balanceAmount,
-            paidAt: paymentStatus === "paid" ? new Date() : undefined,
+            paidAt: paymentStatus === "paid" ? now : undefined,
           },
         },
       ],
@@ -403,7 +732,7 @@ if (!project) {
           {
             warehouseId: sale.warehouse,
             productId: it.product,
-            variantId: it.variant,
+            variantId: it.variant || undefined,
             qty: it.quantity,
           },
           session
@@ -413,12 +742,16 @@ if (!project) {
 
     await session.commitTransaction();
     session.endSession();
+
     return sale;
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
 
-    if (err?.code === 11000) throw new UserInputError("Duplicate value error");
+    if (err?.code === 11000) {
+      throw new UserInputError("Duplicate value error");
+    }
+
     throw new ApolloError(err.message || "Failed to create sale");
   }
 },
@@ -935,7 +1268,6 @@ if (!project) {
 MarkSalePaid: async (_, { saleId, payment }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
 
-  // ✅ only internal roles can mark paid (you can change this)
   if (!["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role)) {
     throw new ForbiddenError("Not allowed to mark sale paid");
   }
@@ -951,48 +1283,54 @@ MarkSalePaid: async (_, { saleId, payment }, ctx) => {
     const sale = await SALE.findById(saleId).session(session);
     if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
 
+    if (["cancelled", "returned"].includes(sale.status)) {
+      throw new UserInputError("Cannot mark cancelled or returned sale as paid");
+    }
+
     const mode = (payment?.mode || sale.payment?.mode || "COD").toUpperCase();
 
     if (!["COD", "ONLINE"].includes(mode)) {
       throw new UserInputError("payment.mode must be COD or ONLINE");
     }
 
-    // ✅ If ONLINE paid => bankAccount required
     const bankAccount = payment?.bankAccount?.trim();
+
     if (mode === "ONLINE" && !bankAccount) {
       throw new UserInputError("bankAccount is required for ONLINE payment");
     }
 
-    // ✅ mark paid
+    const totalAmount = Number(sale.totalAmount || 0);
+
     sale.payment = {
+      ...(sale.payment?.toObject?.() || sale.payment || {}),
       status: "paid",
       mode,
       bankAccount: mode === "ONLINE" ? bankAccount : undefined,
+      paidAmount: totalAmount,
+      balanceAmount: 0,
       paidAt: new Date(),
     };
 
-    // ✅ keep history
-    if (typeof pushHistory === "function") {
-      pushHistory(sale, {
-        status: sale.status,
-        by: ctx.user._id,
-        note: `Payment marked PAID (${mode}${mode === "ONLINE" ? ` - ${bankAccount}` : ""})`,
-      });
-    }
+    pushHistory(sale, {
+      status: sale.status,
+      by: ctx.user._id,
+      note: `Payment marked PAID (${mode}${mode === "ONLINE" ? ` - ${bankAccount}` : ""})`,
+    });
 
     await sale.save({ session });
 
     await session.commitTransaction();
     session.endSession();
+
     return sale;
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+
     throw new ApolloError(err.message || "Failed to mark sale paid");
   }
 },
-
   },
-};
+}; 
 
  export default saleResolvers 

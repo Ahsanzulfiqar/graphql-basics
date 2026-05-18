@@ -8,6 +8,7 @@ type Query {
   GetSaleById(id: ID!): Sale!
   GetAllSales(page: Int = 1, limit: Int = 20): SalePage!
   GetSalesSummaryBySeller(sellerId: ID, projectId: ID, dateFrom: Date, dateTo: Date): [SellerSalesSummary!]!
+   AdminSalesDashboard(filter: AdminSalesDashboardFilterInput): AdminSalesDashboard!
 }
 
 type Mutation {
@@ -47,11 +48,12 @@ type SaleItem {
   sku: String
   quantity: Float!
   salePrice: Float!
+  costPrice: Float
+  lineCost: Float
   lineTotal: Float!
 }
 
 type Sale {
-
   _id: ID!
   project: ID!
   seller: ID!
@@ -70,12 +72,13 @@ type Sale {
   subTotal: Float!
   taxAmount: Float!
   totalAmount: Float!
+  totalCost: Float
+  grossProfit: Float
   statusTimestamps: SaleStatusTimestamps
   statusHistory: [SaleStatusHistory!]!
   createdAt: Date!
   updatedAt: Date!
   payment: PaymentInfo
-
 }
 
 
@@ -179,6 +182,78 @@ input PaymentInput {
   mode: String
   bankAccount: String
   paidAmount: Float
+}
+
+input AdminSalesDashboardFilterInput {
+  projectId: ID
+  sellerId: ID
+  warehouseId: ID
+  status: String
+  paymentStatus: String
+  paymentMode: String
+  country: String
+  city: String
+  dateFrom: Date
+  dateTo: Date
+}
+
+type AdminSalesDashboard {
+  totalRevenue: Float!
+  netProfit: Float!
+  totalOrders: Int!
+  pendingOrders: Int!
+  deliveredOrders: Int!
+  cancelledOrders: Int!
+  returnedOrders: Int!
+  paidAmount: Float!
+  balanceAmount: Float!
+  codPending: Float!
+  averageOrderValue: Float!
+  deliveryRate: Float!
+  returnRate: Float!
+  cancellationRate: Float!
+  topSellers: [TopSeller!]!
+  topProjects: [TopProject!]!
+  topProducts: [TopProduct!]!
+  salesTrend: [SalesTrend!]!
+  statusBreakdown: [StatusBreakdown!]!
+}
+
+type TopSeller {
+  seller: ID!
+  sellerName: String
+  revenue: Float!
+  orders: Int!
+  profit: Float!
+}
+
+
+type TopProject {
+  project: ID!
+  projectName: String
+  revenue: Float!
+  orders: Int!
+  profit: Float!
+}
+type TopProduct {
+  product: ID!
+  productName: String
+  sku: String
+  quantity: Float!
+  revenue: Float!
+  profit: Float!
+}
+
+type SalesTrend {
+  date: String!
+  revenue: Float!
+  orders: Int!
+}
+
+type StatusBreakdown {
+  status: String!
+  orders: Int!
+  revenue: Float!
 }
 
 `

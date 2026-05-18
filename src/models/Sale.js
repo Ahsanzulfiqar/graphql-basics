@@ -99,6 +99,18 @@ const saleSchema = new Schema(
       required: true,
     },
 
+
+    totalCost: {
+  type: Number,
+  default: 0,
+},
+
+grossProfit: {
+  type: Number,
+  default: 0,
+},
+
+
     invoiceNo: { type: String, trim: true },
     customerName: { type: String, trim: true },
     customerPhone: { type: String, trim: true },
