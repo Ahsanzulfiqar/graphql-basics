@@ -17,6 +17,8 @@ import WAREHOUSE from "../../models/warehouse.js";
 import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
 import STOCK_TRANSFER from "../../models/StockTransfer.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
+import PRODUCT from "../../models/Product.js";
+import {applyStockMovement} from "../../services/stock.helpers.js"
 
 
 import mongoose from "mongoose";
@@ -646,6 +648,237 @@ GetWarehouseStockById: async (_, { id }) => {
         handleError(error, "CancelStockTransfer");
       }
     },
+
+    AddOpeningStockForAllProducts: async (
+  _,
+  { warehouseId, quantity },
+  ctx
+) => {
+  if (!ctx.user) throw new AuthenticationError("Login required");
+
+  if (!["ADMIN"].includes(ctx.user.role)) {
+    throw new ForbiddenError("Only admin can perform this action");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const warehouse = await WAREHOUSE.findById(warehouseId).session(session);
+
+    if (!warehouse) {
+      throw new UserInputError("Warehouse not found");
+    }
+
+    const products = await PRODUCT.find({
+      isDeleted: { $ne: true },
+    }).session(session);
+
+    for (const product of products) {
+      await applyStockMovement(
+        {
+          warehouse: warehouseId,
+          product: product._id,
+          deltaQty: quantity,
+        },
+        session
+      );
+
+      await STOCK_LEDGER.create(
+        [
+          {
+            warehouse: warehouseId,
+            product: product._id,
+            quantityIn: quantity,
+            quantityOut: 0,
+            refType: "OPENING",
+            refNo: `OPEN-${Date.now()}`,
+            notes: "Bulk opening stock",
+            createdBy: ctx.user._id,
+          },
+        ],
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      success: true,
+      productsUpdated: products.length,
+    };
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    throw new ApolloError(err.message);
+  }
+},
+AddOpeningStock: async (_, { data }, ctx) => {
+  if (!ctx.user) throw new AuthenticationError("Login required");
+
+  if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
+    throw new ForbiddenError("User not allowed to add opening stock");
+  }
+
+  const {
+    warehouseId,
+    productId,
+    variantId,
+    batches,
+    note,
+  } = data;
+
+  if (!batches || batches.length === 0) {
+    throw new UserInputError("At least one batch is required");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const warehouse = await WAREHOUSE.findById(warehouseId).session(session);
+    if (!warehouse) throw new UserInputError("Warehouse not found");
+
+    const product = await PRODUCT.findById(productId).session(session);
+    if (!product) throw new UserInputError("Product not found");
+
+    if (variantId) {
+      const variant = await PRODUCTVARIANT.findById(variantId).session(session);
+      if (!variant) throw new UserInputError("Variant not found");
+
+      if (String(variant.product) !== String(productId)) {
+        throw new UserInputError("Variant does not belong to product");
+      }
+    }
+
+    let totalQty = 0;
+    let totalValue = 0;
+
+    for (const b of batches) {
+      if (!b.quantity || b.quantity <= 0) {
+        throw new UserInputError("Batch quantity must be greater than 0");
+      }
+
+      if (b.unitCost == null || b.unitCost < 0) {
+        throw new UserInputError("Batch unitCost is required and cannot be negative");
+      }
+
+      totalQty += Number(b.quantity);
+      totalValue += Number(b.quantity) * Number(b.unitCost);
+    }
+
+    const query = {
+      warehouse: warehouseId,
+      product: productId,
+    };
+
+    if (variantId) {
+      query.variant = variantId;
+    } else {
+      query.variant = { $exists: false };
+    }
+
+    let stock = await WAREHOUSE_STOCK.findOne(query).session(session);
+
+    if (!stock) {
+      const stockData = {
+        warehouse: warehouseId,
+        product: productId,
+        quantity: 0,
+        reserved: 0,
+        avgCost: 0,
+        batches: [],
+      };
+
+      if (variantId) stockData.variant = variantId;
+
+      stock = new WAREHOUSE_STOCK(stockData);
+    }
+
+    const oldQty = Number(stock.quantity || 0);
+    const oldAvgCost = Number(stock.avgCost || 0);
+    const oldValue = oldQty * oldAvgCost;
+
+    stock.quantity = oldQty + totalQty;
+
+    stock.avgCost =
+      stock.quantity > 0
+        ? (oldValue + totalValue) / stock.quantity
+        : 0;
+
+    for (const b of batches) {
+      const expiry = b.expiryDate ? new Date(b.expiryDate) : undefined;
+
+      const existingBatch = stock.batches.find((batch) => {
+        const batchExpiry = batch.expiryDate
+          ? new Date(batch.expiryDate).toISOString().split("T")[0]
+          : null;
+
+        const inputExpiry = expiry
+          ? new Date(expiry).toISOString().split("T")[0]
+          : null;
+
+        return (
+          batch.batchNo === b.batchNo &&
+          batchExpiry === inputExpiry &&
+          Number(batch.unitCost || 0) === Number(b.unitCost || 0)
+        );
+      });
+
+      if (existingBatch) {
+        existingBatch.quantity += Number(b.quantity);
+      } else {
+        stock.batches.push({
+          batchNo: b.batchNo,
+          expiryDate: expiry,
+          quantity: Number(b.quantity),
+          unitCost: Number(b.unitCost),
+        });
+      }
+
+      const ledgerData = {
+        warehouse: warehouseId,
+        product: productId,
+        quantityIn: Number(b.quantity),
+        quantityOut: 0,
+        batchNo: b.batchNo,
+        expiryDate: expiry,
+        unitCost: Number(b.unitCost),
+        totalValue: Number(b.quantity) * Number(b.unitCost),
+        refType: "OPENING",
+        refNo: `OPEN-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        notes: note || "Opening stock entry",
+        createdBy: ctx.user._id,
+      };
+
+      if (variantId) ledgerData.variant = variantId;
+
+      await STOCK_LEDGER.create([ledgerData], { session });
+    }
+
+    await stock.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return stock;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    if (
+      err instanceof UserInputError ||
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(err.message || "Failed to add opening stock");
+  }
+},
+    
   },
 
   Subscription: {

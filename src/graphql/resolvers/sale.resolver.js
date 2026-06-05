@@ -1330,6 +1330,7 @@ MarkSalePaid: async (_, { saleId, payment }, ctx) => {
     throw new ApolloError(err.message || "Failed to mark sale paid");
   }
 },
+
   },
 }; 
 

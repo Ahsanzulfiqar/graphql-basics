@@ -19,7 +19,8 @@ const warehouseTypeDefs  = gql`
     CreateStockTransfer(data: CreateStockTransferInput!): StockTransfer!
     ConfirmStockTransfer(id: ID!): StockTransfer!
     CancelStockTransfer(id: ID!): StockTransfer!
-
+    AddOpeningStockForAllProducts(warehouseId: ID!, quantity: Float!): BulkOpeningStockResponse!
+     AddOpeningStock(data: AddOpeningStockInput!): WarehouseStock!
     },
 
 
@@ -64,6 +65,7 @@ type WarehouseStockBatch {
   batchNo: String
   expiryDate: Date
   quantity: Int
+  unitCost: Float
 }
 
 
@@ -159,6 +161,28 @@ type StockTransferItem {
     batchNo: String
     expiryDate: Date
   }
+
+    type BulkOpeningStockResponse {
+    success: Boolean!
+    productsUpdated: Int!
+  }
+
+input OpeningStockBatchInput {
+  batchNo: String
+  expiryDate: String
+  quantity: Float!
+  unitCost: Float!
+}
+
+input AddOpeningStockInput {
+  warehouseId: ID!
+  productId: ID!
+  variantId: ID
+  batches: [OpeningStockBatchInput!]!
+  note: String
+}
+
+
 
 
 `

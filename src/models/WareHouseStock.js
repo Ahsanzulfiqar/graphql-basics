@@ -37,6 +37,8 @@ const warehouseStockSchema = new Schema(
       min: 0,
     },
 
+    
+
     batches: [
       {
         batchNo: String,
