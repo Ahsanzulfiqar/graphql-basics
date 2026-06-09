@@ -716,7 +716,7 @@ GetWarehouseStockById: async (_, { id }) => {
 },
 AddOpeningStock: async (_, { data }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
-
+console.log()
   if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
     throw new ForbiddenError("User not allowed to add opening stock");
   }
@@ -872,6 +872,7 @@ AddOpeningStock: async (_, { data }, ctx) => {
       err instanceof AuthenticationError ||
       err instanceof ForbiddenError
     ) {
+      console.log(err)
       throw err;
     }
 

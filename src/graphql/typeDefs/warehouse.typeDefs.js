@@ -20,7 +20,7 @@ const warehouseTypeDefs  = gql`
     ConfirmStockTransfer(id: ID!): StockTransfer!
     CancelStockTransfer(id: ID!): StockTransfer!
     AddOpeningStockForAllProducts(warehouseId: ID!, quantity: Float!): BulkOpeningStockResponse!
-     AddOpeningStock(data: AddOpeningStockInput!): WarehouseStock!
+    AddOpeningStock(data: AddOpeningStockInput!): WarehouseStock!
     },
 
 
