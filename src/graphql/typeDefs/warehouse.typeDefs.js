@@ -21,6 +21,8 @@ const warehouseTypeDefs  = gql`
     CancelStockTransfer(id: ID!): StockTransfer!
     AddOpeningStockForAllProducts(warehouseId: ID!, quantity: Float!): BulkOpeningStockResponse!
     AddOpeningStock(data: AddOpeningStockInput!): WarehouseStock!
+    UpdateStockWithBatches(data: UpdateStockWithBatchesInput!): WarehouseStock!
+    
     },
 
 
@@ -181,6 +183,23 @@ input AddOpeningStockInput {
   batches: [OpeningStockBatchInput!]!
   note: String
 }
+
+input UpdateStockBatchInput {
+  batchNo: String
+  expiryDate: String
+  quantity: Float!
+  unitCost: Float!
+}
+
+input UpdateStockWithBatchesInput {
+  warehouseId: ID!
+  productId: ID!
+  variantId: ID
+  batches: [UpdateStockBatchInput!]!
+  note: String
+}
+
+
 
 
 

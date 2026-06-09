@@ -879,6 +879,148 @@ console.log()
     throw new ApolloError(err.message || "Failed to add opening stock");
   }
 },
+
+UpdateStockWithBatches: async (_, { data }, ctx) => {
+  if (!ctx.user) throw new AuthenticationError("Login required");
+
+  if (!["ADMIN"].includes(ctx.user.role)) {
+    throw new ForbiddenError("User not allowed to update stock");
+  }
+
+  const {
+    warehouseId,
+    productId,
+    variantId,
+    batches,
+    note,
+  } = data;
+
+  if (!batches || batches.length === 0) {
+    throw new UserInputError("At least one batch is required");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const warehouse = await WAREHOUSE.findById(warehouseId).session(session);
+    if (!warehouse) throw new UserInputError("Warehouse not found");
+
+    const product = await PRODUCT.findById(productId).session(session);
+    if (!product) throw new UserInputError("Product not found");
+
+    if (variantId) {
+      const variant = await PRODUCTVARIANT.findById(variantId).session(session);
+      if (!variant) throw new UserInputError("Variant not found");
+
+      if (String(variant.product) !== String(productId)) {
+        throw new UserInputError("Variant does not belong to product");
+      }
+    }
+
+    const query = {
+      warehouse: warehouseId,
+      product: productId,
+    };
+
+    if (variantId) {
+      query.variant = variantId;
+    } else {
+      query.variant = { $exists: false };
+    }
+
+    let stock = await WAREHOUSE_STOCK.findOne(query).session(session);
+
+    if (!stock) {
+      throw new UserInputError("Stock record not found. Please add opening stock first.");
+    }
+
+    const oldQty = Number(stock.quantity || 0);
+    const oldAvgCost = Number(stock.avgCost || 0);
+    const oldValue = oldQty * oldAvgCost;
+
+    let newQty = 0;
+    let newValue = 0;
+
+    const cleanBatches = batches.map((b) => {
+      if (b.quantity < 0) {
+        throw new UserInputError("Batch quantity cannot be negative");
+      }
+
+      if (b.unitCost == null || b.unitCost < 0) {
+        throw new UserInputError("Batch unitCost is required and cannot be negative");
+      }
+
+      const qty = Number(b.quantity);
+      const cost = Number(b.unitCost);
+
+      newQty += qty;
+      newValue += qty * cost;
+
+      return {
+        batchNo: b.batchNo,
+        expiryDate: b.expiryDate ? new Date(b.expiryDate) : undefined,
+        quantity: qty,
+        unitCost: cost,
+      };
+    });
+
+    if (newQty < Number(stock.reserved || 0)) {
+      throw new UserInputError(
+        `New stock quantity cannot be less than reserved quantity (${stock.reserved})`
+      );
+    }
+
+    stock.batches = cleanBatches;
+    stock.quantity = newQty;
+    stock.avgCost = newQty > 0 ? newValue / newQty : 0;
+
+    await stock.save({ session });
+
+    const qtyDifference = newQty - oldQty;
+    const valueDifference = newValue - oldValue;
+
+    await STOCK_LEDGER.create(
+      [
+        {
+          warehouse: warehouseId,
+          product: productId,
+          variant: variantId || undefined,
+
+          quantityIn: qtyDifference > 0 ? qtyDifference : 0,
+          quantityOut: qtyDifference < 0 ? Math.abs(qtyDifference) : 0,
+
+          unitCost: stock.avgCost,
+          totalValue: valueDifference,
+
+          refType: "ADJUSTMENT",
+          refNo: `STK-UPD-${Date.now()}`,
+          notes: note || "Stock updated with batches",
+          createdBy: ctx.user._id,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return stock;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    if (
+      err instanceof UserInputError ||
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(err.message || "Failed to update stock with batches");
+  }
+},
     
   },
 
