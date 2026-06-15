@@ -225,6 +225,15 @@ grossProfit: {
         type: Date,
       },
     },
+
+    accounting: {
+  salesPosted: { type: Boolean, default: false },
+  salesVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
+
+  paymentPosted: { type: Boolean, default: false },
+  paymentVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
+}
+
   },
   { timestamps: true }
 );

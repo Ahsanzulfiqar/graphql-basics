@@ -22,7 +22,7 @@ const accountSchema = new mongoose.Schema(
 
     parentId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Account",
+      ref: "account",
       default: null,
     },
 

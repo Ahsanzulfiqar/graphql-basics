@@ -12,7 +12,10 @@ import { reserveStock, releaseReservedStock,addBackToBatch } from "../../service
 import { fifoConsume } from "../../services/fifoConsume.js";
 import { requireRoles, requireWarehouseAccess, ensureWarehouseExists } from "../../auth/permissions/permissions.js";
 import PROJECT from "../../models/Project.js";
-
+import {
+  postSaleRevenueVoucher,
+  postSalePaymentVoucher,
+} from "../../services/accounting.helpers.js";
 
 function pushHistory(sale, { status, by, note }) {
   sale.statusHistory = sale.statusHistory || [];
@@ -1043,6 +1046,13 @@ CreateSale: async (_, { data }, ctx) => {
         note: "Sale delivered (reserved released + stock consumed)",
       });
     }
+    if (!sale.accounting?.salesPosted) {
+  const voucher = await postSaleRevenueVoucher(sale, ctx, session);
+
+  sale.accounting = sale.accounting || {};
+  sale.accounting.salesPosted = true;
+  sale.accounting.salesVoucher = voucher._id;
+}
 
     await sale.save({ session });
 
@@ -1316,6 +1326,15 @@ MarkSalePaid: async (_, { saleId, payment }, ctx) => {
       by: ctx.user._id,
       note: `Payment marked PAID (${mode}${mode === "ONLINE" ? ` - ${bankAccount}` : ""})`,
     });
+
+    if (!sale.accounting?.paymentPosted) {
+  const voucher = await postSalePaymentVoucher(sale, mode, ctx, session);
+
+  sale.accounting = sale.accounting || {};
+  sale.accounting.paymentPosted = true;
+  sale.accounting.paymentVoucher = voucher._id;
+}
+
 
     await sale.save({ session });
 

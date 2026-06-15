@@ -11,6 +11,7 @@ import projectResolvers from "./project.resolver.js";
 import userResolvers from "./user.resolver.js";
 import categoryResolvers from "./category.resolvers.js";
 import dashboardResolver from "./dashboard.resolvers.js";
+import accountResolver from "./account.resolvers.js";
 
 
 const resolvers = mergeResolvers([
@@ -22,7 +23,8 @@ const resolvers = mergeResolvers([
   projectResolvers,
   userResolvers,
   categoryResolvers,
-  dashboardResolver
+  dashboardResolver,
+  accountResolver
 ]);
 
 export default resolvers;

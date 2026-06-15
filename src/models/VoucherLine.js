@@ -30,6 +30,23 @@ const voucherLineSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+
+    sourceType: {
+  type: String,
+  enum: ["MANUAL", "SALE", "SALE_PAYMENT"],
+  default: "MANUAL",
+},
+
+sourceId: {
+  type: mongoose.Schema.Types.ObjectId,
+},
+
+paymentMode: {
+  type: String,
+  enum: ["COD", "ONLINE", null],
+  default: null,
+},
+
   },
   { timestamps: true }
 );
