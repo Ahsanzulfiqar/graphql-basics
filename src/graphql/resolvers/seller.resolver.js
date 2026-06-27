@@ -16,8 +16,10 @@ const { equals } = validator;
 import WAREHOUSE from "../../models/warehouse.js";
 import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
 import mongoose from "mongoose";
-
+import { requireRoles } from "../../auth/permissions/permissions.js";
 import SELLER from "../../models/Seller.js";
+import USER from "../../models/User.js";
+
 
 
 
@@ -26,59 +28,75 @@ const sellerResolvers = {
    
     Query: {
 
-  GetSellers: async (_, { search = "", page = 1, limit = 20 }) => {
+   GetSellers: async (_, __, ctx) => {
+      try {
+        if (!ctx.user) {
+          throw new AuthenticationError("Login required");
+        }
+
+        requireRoles(ctx, ["ADMIN", "MANAGER"]);
+
+        const sellers = await USER.find({
+          role: "SELLER",
+          isDeleted: { $ne: true },
+          isActive: true,
+        })
+          .sort({ createdAt: -1 })
+          .lean();
+
+        return sellers || [];
+      } catch (err) {
+        console.error("GetAllSellers error:", err);
+
+        if (
+          err instanceof AuthenticationError ||
+          err instanceof ForbiddenError ||
+          err instanceof UserInputError
+        ) {
+          throw err;
+        }
+
+        throw new ApolloError("Failed to fetch sellers");
+      }
+    },
+
+  GetSellerById: async (_, { id }, ctx) => {
   try {
-    
-    const safePage = Math.max(Number(page) || 1, 1);
-    const safeLimit = Math.max(Number(limit) || 20, 1);
-    const skip = (safePage - 1) * safeLimit;
-
-    const q = {
-      isDeleted: { $ne: true },
-      role: "SELLER",
-    };
-
-    if (search?.trim()) {
-      const regex = { $regex: search.trim(), $options: "i" };
-
-      q.$or = [
-        { name: regex },
-        { email: regex },
-        { phone: regex },
-        { companyName: regex },
-      ];
+    if (!ctx.user) {
+      throw new AuthenticationError("Login required");
     }
 
-    const [total, data] = await Promise.all([
-      USER.countDocuments(q),
-      USER.find(q)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(safeLimit)
-        .lean(),
-    ]);
+    requireRoles(ctx, ["ADMIN", "MANAGER", "SELLER"]);
 
-    return {
-      data: data.map((u) => ({
-        ...u,
-        _id: String(u._id),
-      })),
-      total,
-      page: safePage,
-      limit: safeLimit,
-      totalPages: Math.ceil(total / safeLimit) || 1,
-    };
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new UserInputError("Invalid seller id");
+    }
+
+    const seller = await USER.findOne({
+      _id: id,
+      role: "SELLER",
+      isDeleted: { $ne: true },
+    });
+
+    if (!seller) {
+      throw new UserInputError("Seller not found");
+    }
+
+    return seller;
   } catch (err) {
-    console.error("GetSellers error:", err);
-    throw new ApolloError(err.message || "Failed to fetch sellers");
+    console.error("GetSellerById error:", err);
+
+    if (
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError ||
+      err instanceof UserInputError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError("Failed to fetch seller");
   }
 },
-
-    GetSellerById: async (_, { id }) => {
-      const seller = await SELLER.findOne({ _id: id, isDeleted: { $ne: true } });
-      if (!seller) throw new UserInputError("Seller not found");
-      return seller;
-    },
   },
   Mutation: {
     CreateSeller: async (_, { data }) => {

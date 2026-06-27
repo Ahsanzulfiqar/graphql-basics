@@ -6,6 +6,8 @@ import {
 
 import ACCOUNT from "../../models/Account.js";
 import VOUCHER_LINE from "../../models/VoucherLine.js";
+import VOUCHER from "../../models/Voucher.js";
+import { getNextVoucherNo } from "../../services/accounting.helpers.js";
 
 import {
   requireRoles,
@@ -97,6 +99,166 @@ const accountResolvers = {
         throw new ApolloError(err.message || "Failed to fetch account tree");
       }
     },
+
+    GetVouchers: async (_, { from, to, status }, ctx) => {
+  requireAuth(ctx);
+
+  try {
+    const q = {};
+
+    if (status) q.status = status;
+
+    if (from || to) {
+      q.date = {};
+      if (from) q.date.$gte = new Date(from);
+
+      if (to) {
+        const end = new Date(to);
+        end.setHours(23, 59, 59, 999);
+        q.date.$lte = end;
+      }
+    }
+
+    const vouchers = await VOUCHER.find(q)
+      .sort({ date: -1, createdAt: -1 })
+      .lean();
+
+    return vouchers || [];
+  } catch (err) {
+    console.error("GetVouchers Error:", err);
+    throw new ApolloError(err.message || "Failed to fetch vouchers");
+  }
+},
+
+GetVoucherById: async (_, { id }, ctx) => {
+  requireAuth(ctx);
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw new UserInputError("Invalid voucher id");
+    }
+
+    const voucher = await VOUCHER.findById(id).lean();
+
+    if (!voucher) {
+      throw new UserInputError("Voucher not found");
+    }
+
+    const lines = await VOUCHER_LINE.find({
+      voucherId: id,
+    }).lean();
+
+    return {
+      voucher,
+      lines: lines || [],
+    };
+  } catch (err) {
+    console.error("GetVoucherById Error:", err);
+
+    if (err instanceof UserInputError) throw err;
+
+    throw new ApolloError(err.message || "Failed to fetch voucher");
+  }
+},
+
+GetTrialBalance: async (_, { from, to }, ctx) => {
+  requireAuth(ctx);
+
+  try {
+    const match = {
+      "voucher.status": "POSTED",
+    };
+
+    if (from || to) {
+      match["voucher.date"] = {};
+      if (from) match["voucher.date"].$gte = new Date(from);
+
+      if (to) {
+        const end = new Date(to);
+        end.setHours(23, 59, 59, 999);
+        match["voucher.date"].$lte = end;
+      }
+    }
+
+    const rows = await VOUCHER_LINE.aggregate([
+      {
+        $lookup: {
+          from: "vouchers",
+          localField: "voucherId",
+          foreignField: "_id",
+          as: "voucher",
+        },
+      },
+      { $unwind: "$voucher" },
+      { $match: match },
+      {
+        $group: {
+          _id: "$accountId",
+          debitTotal: { $sum: "$debit" },
+          creditTotal: { $sum: "$credit" },
+        },
+      },
+      {
+        $lookup: {
+          from: "accounts",
+          localField: "_id",
+          foreignField: "_id",
+          as: "account",
+        },
+      },
+      { $unwind: "$account" },
+      {
+        $project: {
+          accountId: "$_id",
+          accountName: "$account.name",
+          accountCode: "$account.code",
+          accountType: "$account.type",
+          debitTotal: 1,
+          creditTotal: 1,
+          balance: { $subtract: ["$debitTotal", "$creditTotal"] },
+        },
+      },
+      { $sort: { accountCode: 1 } },
+    ]);
+
+    let totalDebit = 0;
+    let totalCredit = 0;
+
+    const cleanRows = (rows || []).map((r) => {
+      const debitTotal = Number((r.debitTotal || 0).toFixed(2));
+      const creditTotal = Number((r.creditTotal || 0).toFixed(2));
+
+      totalDebit += debitTotal;
+      totalCredit += creditTotal;
+
+      return {
+        accountId: String(r.accountId),
+        accountName: r.accountName,
+        accountCode: r.accountCode || null,
+        accountType: r.accountType,
+        debitTotal,
+        creditTotal,
+        balance: Number(((r.balance || 0)).toFixed(2)),
+      };
+    });
+
+    totalDebit = Number(totalDebit.toFixed(2));
+    totalCredit = Number(totalCredit.toFixed(2));
+
+    return {
+      from: from || null,
+      to: to || null,
+      rows: cleanRows,
+      totalDebit,
+      totalCredit,
+      isBalanced: totalDebit === totalCredit,
+    };
+  } catch (err) {
+    console.error("GetTrialBalance Error:", err);
+    throw new ApolloError(err.message || "Failed to fetch trial balance");
+  }
+},
+
   },
 
   Mutation: {
@@ -552,6 +714,226 @@ const accountResolvers = {
         throw new ApolloError(err.message || "Failed to enable account");
       }
     },
+
+    CreateMoneyIn: async (_, { data }, ctx) => {
+  requireRoles(ctx, ["ADMIN", "MANAGER"]);
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const amount = Number(data.amount);
+
+    if (!amount || amount <= 0) {
+      throw new UserInputError("Amount must be greater than 0");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(data.receivedToAccountId)) {
+      throw new UserInputError("Invalid receivedToAccountId");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(data.incomeAccountId)) {
+      throw new UserInputError("Invalid incomeAccountId");
+    }
+
+    const receivedTo = await ACCOUNT.findOne({
+      _id: data.receivedToAccountId,
+      type: "ASSET",
+      isDeleted: { $ne: true },
+      isActive: true,
+    }).session(session);
+
+    if (!receivedTo) {
+      throw new UserInputError("Received To account must be active ASSET account");
+    }
+
+    const incomeAccount = await ACCOUNT.findOne({
+      _id: data.incomeAccountId,
+      type: "INCOME",
+      isDeleted: { $ne: true },
+      isActive: true,
+    }).session(session);
+
+    if (!incomeAccount) {
+      throw new UserInputError("Income account must be active INCOME account");
+    }
+    const createdBy = ctx.user?._id || ctx.user?.id;
+
+if (!createdBy || !mongoose.Types.ObjectId.isValid(createdBy)) {
+  throw new UserInputError("Valid user context is required");
+}
+
+
+    const voucherNo = await getNextVoucherNo(session, "JV");
+
+    const [voucher] = await VOUCHER.create(
+      [
+        {
+          voucherNo,
+          type: "JOURNAL",
+          date: data.date ? new Date(data.date) : new Date(),
+          memo: data.memo || "Money In",
+          status: "POSTED",
+          createdBy: createdBy,
+          sourceType: "MONEY_IN",
+          sourceId: null,
+          paymentMode: data.paymentMode || null,
+        },
+      ],
+      { session }
+    );
+
+    await VOUCHER_LINE.insertMany(
+      [
+        {
+          voucherId: voucher._id,
+          accountId: receivedTo._id,
+          debit: amount,
+          credit: 0,
+          memo: data.memo || "Money received",
+          sourceType: "MONEY_IN",
+          sourceId: null,
+          paymentMode: data.paymentMode || null,
+        },
+        {
+          voucherId: voucher._id,
+          accountId: incomeAccount._id,
+          debit: 0,
+          credit: amount,
+          memo: data.memo || "Other income",
+          sourceType: "MONEY_IN",
+          sourceId: null,
+          paymentMode: data.paymentMode || null,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return voucher;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    if (err instanceof UserInputError) throw err;
+    if (err?.code === 11000) throw new UserInputError("Duplicate voucher number");
+
+    throw new ApolloError(err.message || "Failed to create money in");
+  }
+},
+
+CreateMoneyOut: async (_, { data }, ctx) => {
+  requireRoles(ctx, ["ADMIN", "MANAGER"]);
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const amount = Number(data.amount);
+
+    if (!amount || amount <= 0) {
+      throw new UserInputError("Amount must be greater than 0");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(data.paidFromAccountId)) {
+      throw new UserInputError("Invalid paidFromAccountId");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(data.expenseAccountId)) {
+      throw new UserInputError("Invalid expenseAccountId");
+    }
+
+    const paidFrom = await ACCOUNT.findOne({
+      _id: data.paidFromAccountId,
+      type: "ASSET",
+      isDeleted: { $ne: true },
+      isActive: true,
+    }).session(session);
+
+    if (!paidFrom) {
+      throw new UserInputError("Paid From account must be active ASSET account");
+    }
+
+    const expenseAccount = await ACCOUNT.findOne({
+      _id: data.expenseAccountId,
+      type: "EXPENSE",
+      isDeleted: { $ne: true },
+      isActive: true,
+    }).session(session);
+
+    if (!expenseAccount) {
+      throw new UserInputError("Expense account must be active EXPENSE account");
+    }
+
+    const voucherNo = await getNextVoucherNo(session, "JV");
+
+        const createdBy = ctx.user?._id || ctx.user?.id;
+
+if (!createdBy || !mongoose.Types.ObjectId.isValid(createdBy)) {
+  throw new UserInputError("Valid user context is required");
+}
+
+
+    const [voucher] = await VOUCHER.create(
+      [
+        {
+          voucherNo,
+          type: "JOURNAL",
+          date: data.date ? new Date(data.date) : new Date(),
+          memo: data.memo || "Money Out",
+          status: "POSTED",
+          createdBy: createdBy,
+          sourceType: "MONEY_OUT",
+          sourceId: null,
+          paymentMode: data.paymentMode || null,
+        },
+      ],
+      { session }
+    );
+
+    await VOUCHER_LINE.insertMany(
+      [
+        {
+          voucherId: voucher._id,
+          accountId: expenseAccount._id,
+          debit: amount,
+          credit: 0,
+          memo: data.memo || "Expense paid",
+          sourceType: "MONEY_OUT",
+          sourceId: null,
+          paymentMode: data.paymentMode || null,
+        },
+        {
+          voucherId: voucher._id,
+          accountId: paidFrom._id,
+          debit: 0,
+          credit: amount,
+          memo: data.memo || "Paid from account",
+          sourceType: "MONEY_OUT",
+          sourceId: null,
+          paymentMode: data.paymentMode || null,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return voucher;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    if (err instanceof UserInputError) throw err;
+    if (err?.code === 11000) throw new UserInputError("Duplicate voucher number");
+
+    throw new ApolloError(err.message || "Failed to create money out");
+  }
+},
+
   },
 };
 

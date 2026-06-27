@@ -33,7 +33,7 @@ const voucherLineSchema = new mongoose.Schema(
 
     sourceType: {
   type: String,
-  enum: ["MANUAL", "SALE", "SALE_PAYMENT"],
+  enum: ["MANUAL", "SALE", "SALE_PAYMENT", "MONEY_IN", "MONEY_OUT"],
   default: "MANUAL",
 },
 

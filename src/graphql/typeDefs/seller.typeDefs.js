@@ -3,10 +3,11 @@ import { gql } from 'graphql-tag';
 const sellerTypeDefs = gql `
 
 
- type Query {
-  GetSellers(search: String, page: Int = 1, limit: Int = 20): SellerPage!
-  GetSellerById(id: ID!): Seller!
-}
+
+  type Query {
+    GetSellers: [Seller!]!
+    GetSellerById(id: ID!): Seller
+  }
 
    type Mutation {
   CreateSeller(data: CreateSellerInput!): Seller!
@@ -24,17 +25,13 @@ scalar Date
 
 type Seller {
   _id: ID!
-  name: String!
+  name: String
   email: String
   phone: String
-  companyName: String
-  address: String
-  sellerType: String!
-  commissionType: String!
-  commissionValue: Float!
-  isActive: Boolean!
-  createdAt: Date!
-  updatedAt: Date!
+  role: String
+  isActive: Boolean
+  createdAt: String
+  updatedAt: String
 }
 
 input CreateSellerInput {

@@ -979,15 +979,16 @@ CreateSale: async (_, { data }, ctx) => {
 
     for (const it of sale.items) {
       // ✅ 1) Release reserved (variant optional friendly)
-      await releaseReservedStock(
-        {
-          warehouseId: sale.warehouse,
-          productId: it.product,
-          variantId: it.variant || undefined,
-          qty: it.quantity,
-        },
-        session
-      );
+    await releaseReservedStock(
+  {
+    warehouseId: sale.warehouse,
+    productId: it.product,
+    variantId: it.variant || undefined,
+    qty: it.quantity,
+    user: ctx.user,
+  },
+  session
+);
 
       // ✅ 2) Consume physical stock (FIFO) (variant optional friendly)
       const usedBatches = await fifoConsume(
@@ -1111,15 +1112,16 @@ CreateSale: async (_, { data }, ctx) => {
       }
 
       for (const it of sale.items) {
-        await releaseReservedStock(
-          {
-            warehouseId: sale.warehouse,
-            productId: it.product,
-            variantId: it.variant || undefined, // ✅ optional variant friendly
-            qty: it.quantity,
-          },
-          session
-        );
+    await releaseReservedStock(
+  {
+    warehouseId: sale.warehouse,
+    productId: it.product,
+    variantId: it.variant || undefined,
+    qty: it.quantity,
+    user: ctx.user,
+  },
+  session
+);
       }
     }
 
