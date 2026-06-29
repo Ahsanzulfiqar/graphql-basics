@@ -169,6 +169,7 @@ function pushHistory(sale, { status, by, note }) {
   if (filter.projectId) match.project = new mongoose.Types.ObjectId(filter.projectId);
   if (filter.sellerId) match.seller = new mongoose.Types.ObjectId(filter.sellerId);
   if (filter.warehouseId) match.warehouse = new mongoose.Types.ObjectId(filter.warehouseId);
+  if (filter.courierId) match["courier.courierId"] = new mongoose.Types.ObjectId(filter.courierId);
   if (filter.status) match.status = filter.status;
   if (filter.paymentStatus) match["payment.status"] = filter.paymentStatus;
   if (filter.paymentMode) match["payment.mode"] = filter.paymentMode;

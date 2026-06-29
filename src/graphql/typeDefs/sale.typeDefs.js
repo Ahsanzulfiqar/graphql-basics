@@ -188,6 +188,7 @@ input AdminSalesDashboardFilterInput {
   projectId: ID
   sellerId: ID
   warehouseId: ID
+  courierId: ID
   status: String
   paymentStatus: String
   paymentMode: String
