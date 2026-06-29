@@ -1047,8 +1047,10 @@ CreateSale: async (_, { data }, ctx) => {
         note: "Sale delivered (reserved released + stock consumed)",
       });
     }
-    if (!sale.accounting?.salesPosted) {
-  const voucher = await postSaleRevenueVoucher(sale, ctx, session);
+if (!sale.accounting?.salesPosted) {
+
+  console.log(ctx.user,"ctx.user")
+  const voucher = await postSaleRevenueVoucher(sale, ctx.user, session);
 
   sale.accounting = sale.accounting || {};
   sale.accounting.salesPosted = true;

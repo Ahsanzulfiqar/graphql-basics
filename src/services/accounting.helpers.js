@@ -143,9 +143,14 @@ async function createAccountingVoucher(
  * Dr Accounts Receivable
  * Cr Sales Revenue
  */
-export async function postSaleRevenueVoucher(sale, ctx, session) {
-  if (!sale?._id) throw new UserInputError("Sale is required");
-  if (!ctx?.user?._id) throw new UserInputError("User context is required");
+export async function postSaleRevenueVoucher(sale, user, session) {
+  if (!sale?._id) {
+    throw new UserInputError("Sale is required");
+  }
+
+  if (!user?.id) {
+    throw new UserInputError("User context is required");
+  }
 
   if (sale.accounting?.salesPosted) {
     throw new UserInputError("Sale revenue already posted to accounts");
@@ -162,16 +167,26 @@ export async function postSaleRevenueVoucher(sale, ctx, session) {
   }
 
   const amount = round2(sale.totalAmount || 0);
-  if (amount <= 0) throw new UserInputError("Sale totalAmount must be greater than 0");
 
-  const receivableAccount = await getAccountByName("Accounts Receivable", session);
-  const salesRevenueAccount = await getAccountByName("Sales Revenue", session);
+  if (amount <= 0) {
+    throw new UserInputError("Sale totalAmount must be greater than 0");
+  }
+
+  const receivableAccount = await getAccountByName(
+    "Accounts Receivable",
+    session
+  );
+
+  const salesRevenueAccount = await getAccountByName(
+    "Sales Revenue",
+    session
+  );
 
   return createAccountingVoucher(
     {
       date: sale.statusTimestamps?.deliveredAt || new Date(),
       memo: `Sale revenue posted - ${sale.invoiceNo || sale._id}`,
-      createdBy: ctx.user._id,
+      createdBy: user.id,
       sourceType: "SALE",
       sourceId: sale._id,
       paymentMode: null,
@@ -244,7 +259,7 @@ export async function postSalePaymentVoucher(sale, mode, ctx, session) {
     {
       date: new Date(),
       memo: `Sale payment received (${paymentMode}) - ${sale.invoiceNo || sale._id}`,
-      createdBy: ctx.user._id,
+      createdBy: ctx.user.id,
       sourceType: "SALE_PAYMENT",
       sourceId: sale._id,
       paymentMode,
