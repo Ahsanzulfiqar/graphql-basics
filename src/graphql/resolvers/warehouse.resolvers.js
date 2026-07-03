@@ -127,7 +127,7 @@ GetWarehouseStock: async (_, { filter = {}, page = 1, limit = 50 }, ctx) => {
       warehouseName: r.warehouse?.name || null,
       productName: r.product?.name || null,
       variantName: r.variant?.name || null,
-
+      avgCost: r.avgCost ?? 0,
       quantity: r.quantity ?? 0,
       reserved: r.reserved ?? 0,
       reorderLevel: r.reorderLevel ?? 0,
@@ -352,9 +352,6 @@ GetWarehouseStockById: async (_, { id }) => {
     throw error;
   }
 },
-
-
-
 
     UpdateWarehouse: async (_, { _id, data }) => {
       try {

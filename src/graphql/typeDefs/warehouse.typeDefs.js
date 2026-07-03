@@ -83,7 +83,7 @@ type WarehouseStock {
   quantity: Int!
   reserved: Int!
   reorderLevel: Int!
-  avgCost: Float
+  avgCost: Float!   
   batches: [WarehouseStockBatch!]!
   createdAt: Date!
   updatedAt: Date!
