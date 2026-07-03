@@ -439,7 +439,6 @@ CreateSale: async (_, { data }, ctx) => {
   session.startTransaction();
 
   try {
-    // ---------- Validate IDs ----------
     if (!mongoose.Types.ObjectId.isValid(data.projectId)) {
       throw new UserInputError("Invalid projectId");
     }
@@ -452,7 +451,6 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError("Invalid warehouseId");
     }
 
-    // ---------- Validate seller user ----------
     const seller = await USER.findOne({
       _id: data.sellerId,
       isActive: { $ne: false },
@@ -463,7 +461,6 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError("Seller user not found or inactive");
     }
 
-    // ---------- Validate project ----------
     const project = await PROJECT.findOne({
       _id: data.projectId,
       isActive: true,
@@ -473,15 +470,13 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError("Project not found or inactive");
     }
 
-    // ---------- Validate warehouse ----------
     const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
 
     if (!warehouse) {
       throw new UserInputError("Warehouse not found");
     }
 
-    // ---------- Validate project warehouse ----------
-    const warehouseAllowed = project.warehouses.some(
+    const warehouseAllowed = (project.warehouses || []).some(
       (id) => String(id) === String(data.warehouseId)
     );
 
@@ -489,14 +484,16 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError("Warehouse not allowed in this project");
     }
 
-    // ---------- Validate project seller ----------
-  
+    const sellerAllowed =
+      String(project.seller || "") === String(data.sellerId) ||
+      (project.sellers || []).some(
+        (id) => id && String(id) === String(data.sellerId)
+      );
 
-    if (String(project.seller) !== String(data.sellerId)) {
-  throw new UserInputError("Seller not allowed in this project");
-}
+    if (!sellerAllowed) {
+      throw new UserInputError("Seller not allowed in this project");
+    }
 
-    // ---------- Validate sale items ----------
     if (!data.items || data.items.length === 0) {
       throw new UserInputError("Sale items required");
     }
@@ -525,7 +522,6 @@ CreateSale: async (_, { data }, ctx) => {
       throw new UserInputError(`Invalid variantId(s): ${badVariants.join(", ")}`);
     }
 
-    // ---------- Fetch products and variants ----------
     const [products, variants] = await Promise.all([
       PRODUCT.find({ _id: { $in: productIds } })
         .select("_id name sku")
@@ -549,18 +545,20 @@ CreateSale: async (_, { data }, ctx) => {
     const productMap = new Map(products.map((p) => [String(p._id), p]));
     const variantMap = new Map(variants.map((v) => [String(v._id), v]));
 
-    // ---------- Validate variant belongs to product ----------
     for (const it of data.items) {
       if (it.variantId) {
         const variantDoc = variantMap.get(String(it.variantId));
 
-        if (variantDoc && String(variantDoc.product) !== String(it.productId)) {
+        if (!variantDoc) {
+          throw new UserInputError("Variant not found");
+        }
+
+        if (String(variantDoc.product) !== String(it.productId)) {
           throw new UserInputError("Variant does not belong to the given product");
         }
       }
     }
 
-    // ---------- Fetch warehouse stock for avg cost snapshot ----------
     const stockQuery = data.items.map((i) => ({
       warehouse: new mongoose.Types.ObjectId(data.warehouseId),
       product: new mongoose.Types.ObjectId(i.productId),
@@ -569,9 +567,7 @@ CreateSale: async (_, { data }, ctx) => {
         : { variant: { $in: [null, undefined] } }),
     }));
 
-    const stockDocs = await WAREHOUSE_STOCK.find({
-      $or: stockQuery,
-    })
+    const stockDocs = await WAREHOUSE_STOCK.find({ $or: stockQuery })
       .select("_id warehouse product variant quantity reserved avgCost")
       .session(session);
 
@@ -584,7 +580,6 @@ CreateSale: async (_, { data }, ctx) => {
       ])
     );
 
-    // ---------- Build sale items with cost snapshot ----------
     const items = data.items.map((i, idx) => {
       const qty = Number(i.quantity);
       const price = Number(i.salePrice);
@@ -629,12 +624,15 @@ CreateSale: async (_, { data }, ctx) => {
       return itemDoc;
     });
 
-    // ---------- Totals ----------
     const subTotal = Number(
       items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2)
     );
 
     const taxAmount = Number((data.taxAmount || 0).toFixed(2));
+
+    if (!Number.isFinite(taxAmount) || taxAmount < 0) {
+      throw new UserInputError("Invalid taxAmount");
+    }
 
     const totalAmount = Number((subTotal + taxAmount).toFixed(2));
 
@@ -644,7 +642,6 @@ CreateSale: async (_, { data }, ctx) => {
 
     const grossProfit = Number((subTotal - totalCost).toFixed(2));
 
-    // ---------- Payment ----------
     const paidAmount = Number(data?.payment?.paidAmount ?? 0);
 
     if (!Number.isFinite(paidAmount) || paidAmount < 0) {
@@ -652,13 +649,33 @@ CreateSale: async (_, { data }, ctx) => {
     }
 
     if (paidAmount > totalAmount) {
-      throw new UserInputError("payment.paidAmount cannot be greater than totalAmount");
+      throw new UserInputError(
+        "payment.paidAmount cannot be greater than totalAmount"
+      );
+    }
+
+    const paymentMode = (data?.payment?.mode || "COD").toUpperCase();
+
+    if (!["COD", "ONLINE"].includes(paymentMode)) {
+      throw new UserInputError("payment.mode must be COD or ONLINE");
+    }
+
+    if (paymentMode === "ONLINE" && paidAmount > 0) {
+      if (!data?.payment?.bankAccount?.trim()) {
+        throw new UserInputError("bankAccount is required for ONLINE payment");
+      }
     }
 
     const balanceAmount = Number((totalAmount - paidAmount).toFixed(2));
-    const paymentStatus = balanceAmount <= 0 ? "paid" : "unpaid";
 
-    // ---------- Role based status ----------
+    let paymentStatus = "unpaid";
+
+    if (paidAmount > 0 && paidAmount < totalAmount) {
+      paymentStatus = "partial";
+    } else if (paidAmount === totalAmount) {
+      paymentStatus = "paid";
+    }
+
     const now = new Date();
     const status = isAdminManager ? "confirmed" : "draft";
 
@@ -688,7 +705,6 @@ CreateSale: async (_, { data }, ctx) => {
       });
     }
 
-    // ---------- Create sale ----------
     const [sale] = await SALE.create(
       [
         {
@@ -716,10 +732,16 @@ CreateSale: async (_, { data }, ctx) => {
           statusTimestamps,
           statusHistory,
 
+          createdBy: ctx.user._id,
+          updatedBy: ctx.user._id,
+
           payment: {
             status: paymentStatus,
-            mode: data?.payment?.mode || "COD",
-            bankAccount: data?.payment?.bankAccount,
+            mode: paymentMode,
+            bankAccount:
+              paymentMode === "ONLINE"
+                ? data.payment.bankAccount.trim()
+                : undefined,
             paidAmount,
             balanceAmount,
             paidAt: paymentStatus === "paid" ? now : undefined,
@@ -729,7 +751,6 @@ CreateSale: async (_, { data }, ctx) => {
       { session }
     );
 
-    // ---------- Reserve stock if confirmed ----------
     if (sale.status === "confirmed") {
       for (const it of sale.items) {
         await reserveStock(
@@ -753,13 +774,20 @@ CreateSale: async (_, { data }, ctx) => {
     session.endSession();
 
     if (err?.code === 11000) {
-      throw new UserInputError("Duplicate value error");
+      throw new UserInputError("Duplicate invoiceNo or tracking number");
+    }
+
+    if (
+      err instanceof UserInputError ||
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError
+    ) {
+      throw err;
     }
 
     throw new ApolloError(err.message || "Failed to create sale");
   }
 },
-
   
 
     ConfirmSale: async (_, { saleId }, ctx) => {
@@ -839,7 +867,7 @@ CreateSale: async (_, { data }, ctx) => {
         note: "Sale confirmed (stock reserved)",
       });
     }
-
+sale.updatedBy = ctx.user.id;
     await sale.save({ session });
 
     await session.commitTransaction();
@@ -1002,6 +1030,17 @@ CreateSale: async (_, { data }, ctx) => {
         session
       );
 
+
+it.batches = usedBatches.map((b) => ({
+  batchNo: b.batchNo,
+  expiryDate: b.expiryDate,
+  quantity: Number(b.qtyUsed || 0),
+  costPrice: Number(it.costPrice || 0),
+  lineCost: Number(
+    (Number(b.qtyUsed || 0) * Number(it.costPrice || 0)).toFixed(2)
+  ),
+}));
+
       // ✅ 3) Ledger OUT per batch (variant optional)
       for (const b of usedBatches) {
         const row = {
@@ -1050,14 +1089,14 @@ CreateSale: async (_, { data }, ctx) => {
     }
 if (!sale.accounting?.salesPosted) {
 
-  console.log(ctx.user,"ctx.user")
+ 
   const voucher = await postSaleRevenueVoucher(sale, ctx.user, session);
 
   sale.accounting = sale.accounting || {};
   sale.accounting.salesPosted = true;
   sale.accounting.salesVoucher = voucher._id;
 }
-
+sale.updatedBy = ctx.user.id;
     await sale.save({ session });
 
     await session.commitTransaction();
@@ -1333,7 +1372,13 @@ MarkSalePaid: async (_, { saleId, payment }, ctx) => {
     });
 
     if (!sale.accounting?.paymentPosted) {
-  const voucher = await postSalePaymentVoucher(sale, mode, ctx, session);
+
+  const voucher = await postSalePaymentVoucher(
+  sale,
+  mode,
+  ctx,
+  session
+);
 
   sale.accounting = sale.accounting || {};
   sale.accounting.paymentPosted = true;

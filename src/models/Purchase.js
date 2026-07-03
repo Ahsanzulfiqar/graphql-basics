@@ -14,7 +14,7 @@ const purchaseItemSchema = new Schema(
     },
     variant: {
       type: Schema.Types.ObjectId,
-      ref: "productVarient",
+      ref: "productVariant",
       required: false,
     },
     variantName: {
@@ -61,10 +61,11 @@ const purchaseSchema = new Schema(
       trim: true,
     },
 
-    invoiceNo: {
-      type: String,
-      trim: true,
-    },
+  invoiceNo: {
+  type: String,
+  trim: true,
+
+},
 
     warehouse: {
       type: Schema.Types.ObjectId,
@@ -117,7 +118,7 @@ const purchaseSchema = new Schema(
     payment: {
       status: {
         type: String,
-        enum: ["unpaid", "paid"],
+        enum: ["unpaid", "partial", "paid"],
         default: "unpaid",
         index: true,
       },
@@ -145,6 +146,48 @@ const purchaseSchema = new Schema(
     deletedAt: {
       type: Date,
     },
+
+    createdBy: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+},
+
+updatedBy: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+},
+
+deletedBy: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+},
+
+statusTimestamps: {
+  draftAt: Date,
+  confirmedAt: Date,
+  receivedAt: Date,
+  cancelledAt: Date,
+},
+
+statusHistory: [
+  {
+    status: String,
+    at: Date,
+    by: { type: Schema.Types.ObjectId, ref: "user" },
+    note: String,
+  },
+],
+
+
+accounting: {
+  purchasePosted: { type: Boolean, default: false },
+  purchaseVoucher: { type: Schema.Types.ObjectId, ref: "voucher" },
+
+  paymentPosted: { type: Boolean, default: false },
+  paymentVoucher: { type: Schema.Types.ObjectId, ref: "voucher" },
+},
+
+
   },
   { timestamps: true }
 );
@@ -160,6 +203,10 @@ purchaseSchema.pre("save", function (next) {
     paidAmount,
     balanceAmount,
   };
+
+  if (paidAmount > totalAmount) {
+  return next(new Error("Paid amount cannot exceed total amount"));
+}
 
   // ✅ Draft purchase has no final amount yet, so keep unpaid
   if (totalAmount <= 0) {

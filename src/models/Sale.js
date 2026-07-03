@@ -59,6 +59,17 @@ const saleItemSchema = new Schema(
       required: true,
       min: 0,
     },
+
+batches: [
+  {
+    batchNo: { type: String, trim: true },
+    expiryDate: Date,
+    quantity: { type: Number, min: 1 },
+    costPrice: { type: Number, default: 0, min: 0 },
+    lineCost: { type: Number, default: 0, min: 0 },
+  },
+],
+
   },
   { _id: false }
 );
@@ -81,11 +92,12 @@ const saleStatusHistorySchema = new Schema(
  */
 const saleSchema = new Schema(
   {
-    seller: {
-      type: Schema.Types.ObjectId,
-      ref: "seller",
-      required: true,
-    },
+  seller: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+  required: true,
+  index: true,
+},
     
     project: {
       type: Schema.Types.ObjectId,
@@ -111,7 +123,13 @@ grossProfit: {
 },
 
 
-    invoiceNo: { type: String, trim: true },
+    invoiceNo: {
+  type: String,
+  trim: true,
+  unique: true,
+  sparse: true,
+  index: true,
+},
     customerName: { type: String, trim: true },
     customerPhone: { type: String, trim: true },
     country: { type: String },
@@ -189,14 +207,19 @@ grossProfit: {
 
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },
+    deletedBy: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+},
+
 
     payment: {
       status: {
-        type: String,
-        enum: ["unpaid", "paid"],
-        default: "unpaid",
-        index: true,
-      },
+  type: String,
+  enum: ["unpaid", "partial", "paid"],
+  default: "unpaid",
+  index: true,
+},
       mode: {
         type: String,
         enum: ["COD", "ONLINE"],
@@ -232,8 +255,20 @@ grossProfit: {
 
   paymentPosted: { type: Boolean, default: false },
   paymentVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
-}
+},
 
+cancelReason: { type: String, trim: true },
+returnReason: { type: String, trim: true },
+
+createdBy: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+},
+
+updatedBy: {
+  type: Schema.Types.ObjectId,
+  ref: "user",
+},
   },
   { timestamps: true }
 );
@@ -268,12 +303,25 @@ saleSchema.pre("save", function (next) {
   const totalAmount = Number(this.totalAmount || 0);
   const paidAmount = Number(this.payment.paidAmount || 0);
 
+  if (paidAmount > totalAmount) {
+    return next(new Error("Paid amount cannot exceed total amount"));
+  }
+
   this.payment.paidAmount = paidAmount;
   this.payment.balanceAmount = Math.max(totalAmount - paidAmount, 0);
 
-  // Keep old simple flow: only paid/unpaid
-  this.payment.status =
-    this.payment.balanceAmount <= 0 ? "paid" : "unpaid";
+
+  if (paidAmount <= 0) {
+  this.payment.status = "unpaid";
+  this.payment.paidAt = undefined;
+} else if (paidAmount < totalAmount) {
+  this.payment.status = "partial";
+  this.payment.paidAt = undefined;
+} else {
+  this.payment.status = "paid";
+  this.payment.paidAt = this.payment.paidAt || new Date();
+}
+
 
   if (this.payment.status === "paid" && this.payment.mode === "ONLINE") {
     if (!this.payment.bankAccount || !this.payment.bankAccount.trim()) {
@@ -301,5 +349,15 @@ saleSchema.index({ "payment.balanceAmount": 1 });
 saleSchema.index({ project: 1 });
 saleSchema.index({ project: 1, warehouse: 1 });
 saleSchema.index({ project: 1, seller: 1 });
+
+
+saleSchema.index({ seller: 1, createdAt: -1 });
+saleSchema.index({ status: 1, createdAt: -1 });
+saleSchema.index({ project: 1, status: 1, createdAt: -1 });
+saleSchema.index({ warehouse: 1, status: 1 });
+saleSchema.index({ "items.product": 1 });
+saleSchema.index({ "items.variant": 1 });
+saleSchema.index({ country: 1, city: 1 });
+
 
 export default model("sale", saleSchema);

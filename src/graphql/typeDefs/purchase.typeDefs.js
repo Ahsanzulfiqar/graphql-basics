@@ -22,9 +22,7 @@ const purchaseTypeDefs = gql`
     CancelPurchase(purchaseId: ID!, reason: String): Purchase!
     UpdatePurchase(id: ID!, data: UpdatePurchaseInput!): Purchase!
     DeletePurchase(id: ID!): Boolean!
-
     PostToStock(purchaseId: ID!, items: [PostToStockItemInput!]!, taxAmount: Float = 0): Purchase!
-
     AddManualStock(data: ManualStockInput!): WarehouseStock!
   }
 
@@ -41,12 +39,12 @@ const purchaseTypeDefs = gql`
     expiryDate: Date
   }
 
-  type PurchasePayment {
-    status: String!
-    paidAmount: Float!
-    balanceAmount: Float!
-    paidAt: Date
-  }
+type PurchasePayment {
+  status: String!
+  paidAmount: Float!
+  balanceAmount: Float!
+  paidAt: Date
+}
 
   type Purchase {
     _id: ID!
@@ -65,6 +63,14 @@ const purchaseTypeDefs = gql`
     payment: PurchasePayment
     createdAt: Date!
     updatedAt: Date!
+
+    statusTimestamps: PurchaseStatusTimestamps
+    statusHistory: [PurchaseStatusHistory!]!
+    createdBy: ID
+     updatedBy: ID
+deletedBy: ID
+deletedAt: Date
+isDeleted: Boolean
   }
 
   input PurchaseItemInput {
@@ -95,6 +101,20 @@ const purchaseTypeDefs = gql`
     variant: ID
     quantity: Int!
   }
+
+type PurchaseStatusTimestamps {
+  draftAt: Date
+  confirmedAt: Date
+  receivedAt: Date
+  cancelledAt: Date
+}
+
+type PurchaseStatusHistory {
+  status: String!
+  at: Date!
+  by: ID
+  note: String
+}
 
   input UpdatePurchaseInput {
     supplierName: String

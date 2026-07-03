@@ -5,6 +5,7 @@ import WAREHOUSE from "../../models/warehouse.js";
 import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
 import { applyStockMovement } from "../../services/stock.helpers.js";
+// import { postPurchaseVoucher } from "../../services/accounting.helpers.js";
 
 import {
   ApolloError,
@@ -138,8 +139,15 @@ const purchaseResolvers = {
   },
 
   Mutation: {
-    CreatePurchase: async (_, { data }) => {
+    CreatePurchase: async (_, { data }, ctx) => {
       try {
+
+        if (!ctx.user) throw new AuthenticationError("Login required");
+
+if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
+  throw new ForbiddenError("Not allowed to create purchase");
+}
+
         if (!data.items || data.items.length === 0) {
           throw new UserInputError("At least one purchase item is required.");
         }
@@ -233,11 +241,26 @@ const purchaseResolvers = {
           totalAmount: 0,
           notes: data.notes,
           postedToStock: false,
+          createdBy: ctx.user.id,
+          updatedBy: ctx.user.id,
           payment: {
             status: "unpaid",
             paidAmount: 0,
             balanceAmount: 0,
           },
+          statusTimestamps: {
+  draftAt: new Date(),
+},
+
+statusHistory: [
+  {
+    status: "draft",
+    at: new Date(),
+    by: ctx.user._id,
+    note: "Purchase created",
+  },
+],
+
         });
 
         return purchase;
@@ -246,8 +269,6 @@ const purchaseResolvers = {
         throw new ApolloError(err.message || "Failed to create purchase");
       }
     },
-
- 
 
 UpdatePurchase: async (_, { id, data }, ctx) => {
   try {
@@ -388,188 +409,284 @@ UpdatePurchase: async (_, { id, data }, ctx) => {
   }
 },
 
-    ConfirmPurchase: async (_, { purchaseId }) => {
-      try {
-        if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
-          throw new UserInputError("Invalid purchaseId");
-        }
+  ConfirmPurchase: async (_, { purchaseId }, ctx) => {
+  try {
+    if (!ctx.user) throw new AuthenticationError("Login required");
 
-        const purchase = await PURCHASE.findOne({
-          _id: purchaseId,
-          isDeleted: { $ne: true },
-        });
+    if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
+      throw new ForbiddenError("Not allowed to confirm purchase");
+    }
 
-        if (!purchase) throw new UserInputError("Purchase not found");
+    if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
+      throw new UserInputError("Invalid purchaseId");
+    }
 
-        if (purchase.status === "cancelled") {
-          throw new UserInputError("Cancelled purchase cannot be confirmed");
-        }
+    const purchase = await PURCHASE.findOne({
+      _id: purchaseId,
+      isDeleted: { $ne: true },
+    });
 
-        if (purchase.status === "received" || purchase.postedToStock) {
-          throw new UserInputError("Received purchase cannot be confirmed again");
-        }
+    if (!purchase) throw new UserInputError("Purchase not found");
 
-        if (!purchase.items || purchase.items.length === 0) {
-          throw new UserInputError("Purchase must have at least one item");
-        }
+    if (purchase.status !== "draft") {
+      throw new UserInputError("Only draft purchase can be confirmed");
+    }
 
-        purchase.status = "confirmed";
-        await purchase.save();
+    if (!purchase.items || purchase.items.length === 0) {
+      throw new UserInputError("Purchase must have at least one item");
+    }
 
-        return purchase;
-      } catch (err) {
-        console.error("ConfirmPurchase error:", err);
-        throw new ApolloError(err.message || "Failed to confirm purchase");
+    purchase.status = "confirmed";
+
+    purchase.statusTimestamps = purchase.statusTimestamps || {};
+    purchase.statusTimestamps.confirmedAt = new Date();
+
+    purchase.statusHistory = purchase.statusHistory || [];
+    purchase.statusHistory.push({
+      status: "confirmed",
+      at: new Date(),
+      by: ctx.user._id,
+      note: "Purchase confirmed",
+    });
+
+    purchase.updatedBy = ctx.user._id;
+
+    await purchase.save();
+
+    return purchase;
+  } catch (err) {
+    console.error("ConfirmPurchase error:", err);
+
+    if (
+      err instanceof UserInputError ||
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(err.message || "Failed to confirm purchase");
+  }
+},
+
+  PostToStock: async (_, { purchaseId, items, taxAmount = 0 }, ctx) => {
+  if (!ctx.user) throw new AuthenticationError("Login required");
+
+  if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
+    throw new ForbiddenError("Not allowed to post purchase to stock");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
+      throw new UserInputError("Invalid purchaseId");
+    }
+
+    const purchase = await PURCHASE.findById(purchaseId).session(session);
+
+    if (!purchase || purchase.isDeleted) {
+      throw new UserInputError("Purchase not found");
+    }
+
+    if (purchase.postedToStock) {
+      throw new UserInputError("Purchase already posted to stock");
+    }
+
+    if (purchase.status !== "confirmed") {
+      throw new UserInputError("Only confirmed purchases can be posted to stock");
+    }
+
+    if (!purchase.items || purchase.items.length === 0) {
+      throw new UserInputError("Purchase has no items");
+    }
+
+    if (!items || items.length !== purchase.items.length) {
+      throw new UserInputError("PostToStock items must match purchase items count");
+    }
+
+    const seen = new Set();
+
+    for (const it of items) {
+      const key = `${String(it.product)}-${String(it.variant || "no-variant")}`;
+
+      if (seen.has(key)) {
+        throw new UserInputError("Duplicate product/variant in PostToStock items");
       }
-    },
 
-    PostToStock: async (_, { purchaseId, items, taxAmount = 0 }) => {
-      const session = await mongoose.startSession();
-      session.startTransaction();
+      seen.add(key);
+    }
 
-      try {
-        if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
-          throw new UserInputError("Invalid purchaseId");
-        }
+    const warehouse = await WAREHOUSE.findById(purchase.warehouse).session(session);
 
-        const purchase = await PURCHASE.findById(purchaseId).session(session);
+    if (!warehouse) {
+      throw new UserInputError("Warehouse not found");
+    }
 
-        if (!purchase || purchase.isDeleted) {
-          throw new UserInputError("Purchase not found");
-        }
+    const safeTaxAmount = Number(taxAmount || 0);
 
-        if (purchase.postedToStock) {
-          throw new UserInputError("Purchase already posted to stock");
-        }
+    if (!Number.isFinite(safeTaxAmount) || safeTaxAmount < 0) {
+      throw new UserInputError("Invalid taxAmount");
+    }
 
-        if (purchase.status === "cancelled") {
-          throw new UserInputError("Cancelled purchase cannot be posted");
-        }
+    let subTotal = 0;
 
-        if (!["draft", "confirmed"].includes(purchase.status)) {
-          throw new UserInputError("Only draft or confirmed purchases can be posted");
-        }
+    for (const pItem of purchase.items) {
+      const matchingItem = items.find((it) => {
+        const sameProduct = String(it.product) === String(pItem.product);
+        const sameVariant = String(it.variant || "") === String(pItem.variant || "");
+        return sameProduct && sameVariant;
+      });
 
-        if (!purchase.items || purchase.items.length === 0) {
-          throw new UserInputError("Purchase has no items");
-        }
-
-        if (!items || items.length !== purchase.items.length) {
-          throw new UserInputError("PostToStock items must match purchase items count");
-        }
-
-        const warehouse = await WAREHOUSE.findById(purchase.warehouse).session(session);
-        if (!warehouse) {
-          throw new UserInputError("Warehouse not found");
-        }
-
-        let subTotal = 0;
-
-        for (const pItem of purchase.items) {
-          const matchingItem = items.find((it) => {
-            const sameProduct = String(it.product) === String(pItem.product);
-            const sameVariant = String(it.variant || "") === String(pItem.variant || "");
-            return sameProduct && sameVariant;
-          });
-
-          if (!matchingItem) {
-            throw new UserInputError(`Missing stock details for product ${pItem.product}`);
-          }
-
-          if (
-            matchingItem.purchasePrice == null ||
-            Number(matchingItem.purchasePrice) < 0
-          ) {
-            throw new UserInputError(`Purchase price is required for product ${pItem.product}`);
-          }
-
-          pItem.purchasePrice = Number(matchingItem.purchasePrice);
-          pItem.batchNo = matchingItem.batchNo || undefined;
-          pItem.expiryDate = matchingItem.expiryDate
-            ? new Date(matchingItem.expiryDate)
-            : undefined;
-
-          pItem.lineTotal = Number((Number(pItem.quantity) * pItem.purchasePrice).toFixed(2));
-
-          subTotal += pItem.lineTotal;
-        }
-
-        purchase.subTotal = Number(subTotal.toFixed(2));
-        purchase.taxAmount = Number(Number(taxAmount || 0).toFixed(2));
-        purchase.totalAmount = Number((purchase.subTotal + purchase.taxAmount).toFixed(2));
-
-        purchase.payment = {
-          status: "unpaid",
-          paidAmount: 0,
-          balanceAmount: purchase.totalAmount,
-        };
-
-        const ledgerDocs = [];
-
-        for (const item of purchase.items) {
-          const qty = Number(item.quantity || 0);
-
-          if (qty <= 0) {
-            throw new UserInputError("Invalid item quantity");
-          }
-
-          await applyStockMovement(
-            {
-              warehouse: purchase.warehouse,
-              product: item.product,
-              variant: item.variant || undefined,
-              batchNo: item.batchNo,
-              expiryDate: item.expiryDate,
-              deltaQty: qty,
-              purchasePrice: item.purchasePrice,
-            },
-            session
-          );
-
-          const ledgerRow = {
-            purchase: purchase._id,
-            product: item.product,
-            warehouse: purchase.warehouse,
-            quantityIn: qty,
-            quantityOut: 0,
-            batchNo: item.batchNo,
-            expiryDate: item.expiryDate,
-            refType: "PURCHASE",
-            refNo: purchase.invoiceNo || String(purchase._id),
-            notes: "Posted from purchase",
-          };
-
-          if (item.variant) {
-            ledgerRow.variant = item.variant;
-          }
-
-          ledgerDocs.push(ledgerRow);
-        }
-
-        if (ledgerDocs.length > 0) {
-          await STOCK_LEDGER.insertMany(ledgerDocs, { session });
-        }
-
-        purchase.status = "received";
-        purchase.postedToStock = true;
-
-        await purchase.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-        return {
-          ...purchase.toObject(),
-          warehouse: String(purchase.warehouse),
-          warehouseName: warehouse.name || null,
-        };
-      } catch (err) {
-        await session.abortTransaction();
-        session.endSession();
-        console.error("PostToStock error:", err);
-        throw new ApolloError(err.message || "Failed to post to stock");
+      if (!matchingItem) {
+        throw new UserInputError(`Missing stock details for product ${pItem.product}`);
       }
-    },
+
+      const purchasePrice = Number(matchingItem.purchasePrice);
+
+      if (!Number.isFinite(purchasePrice) || purchasePrice < 0) {
+        throw new UserInputError(`Purchase price is required for product ${pItem.product}`);
+      }
+
+let expiryDate = undefined;
+
+if (matchingItem.expiryDate) {
+  expiryDate = new Date(matchingItem.expiryDate);
+
+  if (Number.isNaN(expiryDate.getTime())) {
+    throw new UserInputError(`Invalid expiryDate for product ${pItem.product}`);
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const expiryDay = new Date(expiryDate);
+  expiryDay.setHours(0, 0, 0, 0);
+
+  if (expiryDay < today) {
+    throw new UserInputError(
+      `Expiry date cannot be in the past for product ${pItem.productName}`
+    );
+  }
+}
+
+pItem.purchasePrice = purchasePrice;
+pItem.batchNo = matchingItem.batchNo?.trim() || undefined;
+pItem.expiryDate = expiryDate;
+      pItem.lineTotal = Number((Number(pItem.quantity) * purchasePrice).toFixed(2));
+
+      subTotal += pItem.lineTotal;
+    }
+
+    purchase.subTotal = Number(subTotal.toFixed(2));
+    purchase.taxAmount = Number(safeTaxAmount.toFixed(2));
+    purchase.totalAmount = Number((purchase.subTotal + purchase.taxAmount).toFixed(2));
+
+    purchase.payment = {
+      status: "unpaid",
+      paidAmount: 0,
+      balanceAmount: purchase.totalAmount,
+    };
+
+    const ledgerDocs = [];
+
+    for (const item of purchase.items) {
+      const qty = Number(item.quantity || 0);
+
+      if (qty <= 0) {
+        throw new UserInputError("Invalid item quantity");
+      }
+
+      await applyStockMovement(
+        {
+          warehouse: purchase.warehouse,
+          product: item.product,
+          variant: item.variant || undefined,
+          batchNo: item.batchNo,
+          expiryDate: item.expiryDate,
+          deltaQty: qty,
+          purchasePrice: item.purchasePrice,
+        },
+        session
+      );
+
+      const ledgerRow = {
+        purchase: purchase._id,
+        product: item.product,
+        warehouse: purchase.warehouse,
+        quantityIn: qty,
+        quantityOut: 0,
+        batchNo: item.batchNo,
+        expiryDate: item.expiryDate,
+        refType: "PURCHASE",
+        refNo: purchase.invoiceNo || String(purchase._id),
+        notes: "Posted from purchase",
+        createdBy: ctx.user._id,
+      };
+
+      if (item.variant) {
+        ledgerRow.variant = item.variant;
+      }
+
+      ledgerDocs.push(ledgerRow);
+    }
+
+    if (ledgerDocs.length > 0) {
+      await STOCK_LEDGER.insertMany(ledgerDocs, { session });
+    }
+
+       if (!purchase.accounting?.purchasePosted) {
+  const voucher = await postPurchaseVoucher(purchase, ctx.user, session);
+
+  purchase.accounting = purchase.accounting || {};
+  purchase.accounting.purchasePosted = true;
+  purchase.accounting.purchaseVoucher = voucher._id;
+}
+
+
+    purchase.status = "received";
+    purchase.postedToStock = true;
+
+    purchase.statusTimestamps = purchase.statusTimestamps || {};
+    purchase.statusTimestamps.receivedAt = new Date();
+
+    purchase.statusHistory = purchase.statusHistory || [];
+    purchase.statusHistory.push({
+      status: "received",
+      at: new Date(),
+      by: ctx.user._id,
+      note: "Purchase posted to stock",
+    });
+
+    purchase.updatedBy = ctx.user._id;
+    await purchase.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      ...purchase.toObject(),
+      warehouse: String(purchase.warehouse),
+      warehouseName: warehouse.name || null,
+    };
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("PostToStock error:", err);
+
+    if (
+      err instanceof UserInputError ||
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(err.message || "Failed to post to stock");
+  }
+},
 
     CancelPurchase: async (_, { purchaseId, reason }) => {
       try {

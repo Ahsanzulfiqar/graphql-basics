@@ -8,7 +8,7 @@ type Query {
   GetSaleById(id: ID!): Sale!
   GetAllSales(page: Int = 1, limit: Int = 20): SalePage!
   GetSalesSummaryBySeller(sellerId: ID, projectId: ID, dateFrom: Date, dateTo: Date): [SellerSalesSummary!]!
-   AdminSalesDashboard(filter: AdminSalesDashboardFilterInput): AdminSalesDashboard!
+  AdminSalesDashboard(filter: AdminSalesDashboardFilterInput): AdminSalesDashboard!
 }
 
 type Mutation {
@@ -16,8 +16,8 @@ type Mutation {
   ConfirmSale(saleId: ID!): Sale!
   MarkOutForDelivery(saleId: ID!, data: OutForDeliveryInput!): Sale!
   MarkDelivered(saleId: ID!): Sale!
-  CancelSale(saleId: ID!): Boolean!
-  ReturnSale(saleId: ID!): Sale!
+CancelSale(saleId: ID!, reason: String): Boolean!
+ReturnSale(saleId: ID!, reason: String): Sale!
   MarkSalePaid(saleId: ID!, payment: PaymentInput!): Sale!
 }
 
@@ -51,7 +51,17 @@ type SaleItem {
   costPrice: Float
   lineCost: Float
   lineTotal: Float!
+  batches: [SaleItemBatch!]
 }
+
+type SaleItemBatch {
+  batchNo: String
+  expiryDate: Date
+  quantity: Float
+  costPrice: Float
+  lineCost: Float
+}
+
 
 type Sale {
   _id: ID!
@@ -79,7 +89,17 @@ type Sale {
   createdAt: Date!
   updatedAt: Date!
   payment: PaymentInfo
+  notes: String
+cancelReason: String
+returnReason: String
+createdBy: ID
+updatedBy: ID
+deletedBy: ID
+isDeleted: Boolean
+deletedAt: Date
 }
+
+
 
 
 type SalePage {
@@ -110,7 +130,7 @@ type SaleStatusHistory {
 input SaleItemInput {
   productId: ID!
   variantId: ID
-  productName: String!
+  productName: String
   variantName: String
   sku: String
   quantity: Float!
@@ -178,7 +198,6 @@ type PaymentInfo {
 }
 
 input PaymentInput {
-  status: String
   mode: String
   bankAccount: String
   paidAmount: Float
@@ -200,7 +219,8 @@ input AdminSalesDashboardFilterInput {
 
 type AdminSalesDashboard {
   totalRevenue: Float!
-  netProfit: Float!
+  netProfit: Float! 
+ 
   totalOrders: Int!
   pendingOrders: Int!
   deliveredOrders: Int!

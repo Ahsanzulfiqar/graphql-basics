@@ -225,7 +225,7 @@ export async function postSaleRevenueVoucher(sale, user, session) {
  */
 export async function postSalePaymentVoucher(sale, mode, ctx, session) {
   if (!sale?._id) throw new UserInputError("Sale is required");
-  if (!ctx?.user?._id) throw new UserInputError("User context is required");
+  if (!ctx?.user?.id) throw new UserInputError("User context is required");
 
   const paymentMode = String(mode || "").toUpperCase();
 

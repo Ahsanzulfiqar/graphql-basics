@@ -18,6 +18,7 @@ const validateWarehouses = async (warehouseIds) => {
 
 const validateUser = async (userId) => {
   if (!userId) return;
+console.log(userId,"userId")
 
   const user = await USER.findById(userId);
   if (!user) {
