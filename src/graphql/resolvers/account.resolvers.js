@@ -7,7 +7,7 @@ import {
 import ACCOUNT from "../../models/Account.js";
 import VOUCHER_LINE from "../../models/VoucherLine.js";
 import VOUCHER from "../../models/Voucher.js";
-import { getNextVoucherNo } from "../../services/accounting.helpers.js";
+import { getNextNo } from "../../services/accounting.helpers.js";
 
 import {
   requireRoles,
@@ -764,7 +764,7 @@ if (!createdBy || !mongoose.Types.ObjectId.isValid(createdBy)) {
 }
 
 
-    const voucherNo = await getNextVoucherNo(session, "JV");
+    const voucherNo =   await getNextNo("voucher", "JV", session);
 
     const [voucher] = await VOUCHER.create(
       [
@@ -867,7 +867,7 @@ CreateMoneyOut: async (_, { data }, ctx) => {
       throw new UserInputError("Expense account must be active EXPENSE account");
     }
 
-    const voucherNo = await getNextVoucherNo(session, "JV");
+    const voucherNo =  await getNextNo("voucher", "JV", session);
 
         const createdBy = ctx.user?._id || ctx.user?.id;
 

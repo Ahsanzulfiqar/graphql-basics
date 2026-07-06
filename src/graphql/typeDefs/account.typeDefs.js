@@ -108,6 +108,8 @@ enum VoucherSourceType {
   MANUAL
   SALE
   SALE_PAYMENT
+  PURCHASE
+  PURCHASE_PAYMENT
   MONEY_IN
   MONEY_OUT
 }
@@ -158,11 +160,13 @@ type VoucherLine {
   }
 
   enum VoucherSourceType {
-    MANUAL
-    SALE
-    SALE_PAYMENT
-    MONEY_IN
-    MONEY_OUT
+  MANUAL
+  SALE
+  SALE_PAYMENT
+  PURCHASE
+  PURCHASE_PAYMENT
+  MONEY_IN
+  MONEY_OUT
   }
 
   enum PaymentMode {

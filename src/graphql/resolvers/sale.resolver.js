@@ -17,6 +17,9 @@ import {
   postSalePaymentVoucher,
 } from "../../services/accounting.helpers.js";
 
+
+
+
 function pushHistory(sale, { status, by, note }) {
   sale.statusHistory = sale.statusHistory || [];
   sale.statusHistory.push({ status, at: new Date(), by, note });

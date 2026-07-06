@@ -13,16 +13,31 @@ const round2 = (n) =>
  * Auto voucher number
  * Example: JV-000001
  */
-export async function getNextVoucherNo(session, key = "JV") {
+
+
+
+export const getNextNo = async (key, prefix, session) => {
+  console.log("GET NEXT NO KEY:", key, "PREFIX:", prefix);
+
+  if (!key) {
+    throw new Error("Counter key is missing");
+  }
+
   const counter = await COUNTER.findOneAndUpdate(
     { key },
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true, session }
+    {
+      $inc: { seq: 1 },
+      $setOnInsert: { key },
+    },
+    {
+      new: true,
+      upsert: true,
+      session,
+    }
   );
 
-  return `${key}-${String(counter.seq).padStart(6, "0")}`;
-}
-
+  return `${prefix}-${String(counter.seq).padStart(6, "0")}`;
+};
 /**
  * Find required account by name
  */
@@ -98,7 +113,7 @@ async function createAccountingVoucher(
     );
   }
 
-  const voucherNo = await getNextVoucherNo(session, "JV");
+  const voucherNo = await getNextNo("voucher", "JV", session);
 
   const [voucher] = await VOUCHER.create(
     [
@@ -280,4 +295,82 @@ export async function postSalePaymentVoucher(sale, mode, ctx, session) {
     },
     session
   );
+}
+
+export async function postPurchaseVoucher(purchase, user, session) {
+  const createdBy = user?._id || user?.id;
+
+  if (!createdBy) {
+    throw new Error("User context is required");
+  }
+
+  const inventoryAccount = await ACCOUNT.findOne({
+    code: "1040",
+    isDeleted: { $ne: true },
+  }).session(session);
+
+  const payableAccount = await ACCOUNT.findOne({
+    code: "2010",
+    isDeleted: { $ne: true },
+  }).session(session);
+
+  if (!inventoryAccount) {
+    throw new Error("Inventory account not found");
+  }
+
+  if (!payableAccount) {
+    throw new Error("Accounts Payable account not found");
+  }
+
+  const totalAmount = Number(purchase.totalAmount || 0);
+
+  if (totalAmount <= 0) {
+    throw new Error("Purchase amount must be greater than 0");
+  }
+
+  const voucherNo = await getNextNo("voucher", "JV", session);
+
+  const [voucher] = await VOUCHER.create(
+    [
+      {
+        voucherNo,
+        type: "JOURNAL",
+        date: purchase.purchaseDate || new Date(),
+        memo: `Purchase received: ${
+          purchase.purchaseNo || purchase.invoiceNo || purchase._id
+        }`,
+        status: "POSTED",
+        createdBy,
+        sourceType: "PURCHASE",
+        sourceId: purchase._id,
+      },
+    ],
+    { session }
+  );
+
+  await VOUCHER_LINE.insertMany(
+    [
+      {
+        voucherId: voucher._id,
+        accountId: inventoryAccount._id,
+        debit: totalAmount,
+        credit: 0,
+        memo: "Inventory purchased",
+        sourceType: "PURCHASE",
+        sourceId: purchase._id,
+      },
+      {
+        voucherId: voucher._id,
+        accountId: payableAccount._id,
+        debit: 0,
+        credit: totalAmount,
+        memo: "Supplier payable",
+        sourceType: "PURCHASE",
+        sourceId: purchase._id,
+      },
+    ],
+    { session }
+  );
+
+  return voucher;
 }

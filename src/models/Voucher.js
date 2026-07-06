@@ -11,7 +11,7 @@ const voucherSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["JOURNAL"],
+      enum: ["JOURNAL","PURCHASE","PAYMENT"],
       default: "JOURNAL",
     },
 

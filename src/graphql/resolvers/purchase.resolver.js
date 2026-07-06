@@ -5,7 +5,7 @@ import WAREHOUSE from "../../models/warehouse.js";
 import WAREHOUSE_STOCK from "../../models/WareHouseStock.js";
 import STOCK_LEDGER from "../../models/StockLedger.js";
 import { applyStockMovement } from "../../services/stock.helpers.js";
-// import { postPurchaseVoucher } from "../../services/accounting.helpers.js";
+ import { postPurchaseVoucher } from "../../services/accounting.helpers.js";
 
 import {
   ApolloError,
@@ -15,6 +15,8 @@ import {
 } from "apollo-server-express";
 
 import mongoose from "mongoose";
+import COUNTER from "../../models/Counter.js";
+
 
 const toId = (id) => new mongoose.Types.ObjectId(id);
 
@@ -139,101 +141,120 @@ const purchaseResolvers = {
   },
 
   Mutation: {
-    CreatePurchase: async (_, { data }, ctx) => {
-      try {
+  CreatePurchase: async (_, { data }, ctx) => {
+  if (!ctx.user) throw new AuthenticationError("Login required");
 
-        if (!ctx.user) throw new AuthenticationError("Login required");
+  if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
+    throw new ForbiddenError("Not allowed to create purchase");
+  }
 
-if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
-  throw new ForbiddenError("Not allowed to create purchase");
-}
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-        if (!data.items || data.items.length === 0) {
-          throw new UserInputError("At least one purchase item is required.");
-        }
+  try {
+    if (!data.items || data.items.length === 0) {
+      throw new UserInputError("At least one purchase item is required.");
+    }
 
-        if (!mongoose.Types.ObjectId.isValid(data.warehouseId)) {
-          throw new UserInputError(`Invalid warehouseId: ${data.warehouseId}`);
-        }
+    if (!mongoose.Types.ObjectId.isValid(data.warehouseId)) {
+      throw new UserInputError(`Invalid warehouseId: ${data.warehouseId}`);
+    }
 
-        const warehouse = await WAREHOUSE.findById(data.warehouseId);
-        if (!warehouse) {
-          throw new UserInputError("Warehouse not found");
-        }
+    const warehouse = await WAREHOUSE.findById(data.warehouseId).session(session);
+    if (!warehouse) {
+      throw new UserInputError("Warehouse not found");
+    }
 
-        const productIds = [...new Set(data.items.map((it) => it.product))].filter(Boolean);
-        const variantIds = [...new Set(data.items.map((it) => it.variant))].filter(Boolean);
+    const productIds = [...new Set(data.items.map((it) => it.product))].filter(Boolean);
+    const variantIds = [...new Set(data.items.map((it) => it.variant))].filter(Boolean);
 
-        const badProductIds = productIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-        if (badProductIds.length) {
-          throw new UserInputError(`Invalid product ids: ${badProductIds.join(", ")}`);
-        }
+    const badProductIds = productIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+    if (badProductIds.length) {
+      throw new UserInputError(`Invalid product ids: ${badProductIds.join(", ")}`);
+    }
 
-        const badVariantIds = variantIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-        if (badVariantIds.length) {
-          throw new UserInputError(`Invalid variant ids: ${badVariantIds.join(", ")}`);
-        }
+    const badVariantIds = variantIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+    if (badVariantIds.length) {
+      throw new UserInputError(`Invalid variant ids: ${badVariantIds.join(", ")}`);
+    }
 
-        const products = await PRODUCT.find({ _id: { $in: productIds } }).select("_id name sku");
-        const productMap = new Map(products.map((p) => [String(p._id), p]));
+    const products = await PRODUCT.find({ _id: { $in: productIds } })
+      .select("_id name sku")
+      .session(session);
 
-        const missingProducts = productIds.filter((id) => !productMap.has(id));
-        if (missingProducts.length) {
-          throw new UserInputError(`Products not found: ${missingProducts.join(", ")}`);
-        }
+    const productMap = new Map(products.map((p) => [String(p._id), p]));
 
-        let variantMap = new Map();
+    const missingProducts = productIds.filter((id) => !productMap.has(String(id)));
+    if (missingProducts.length) {
+      throw new UserInputError(`Products not found: ${missingProducts.join(", ")}`);
+    }
 
-        if (variantIds.length > 0) {
-          const variants = await PRODUCTVARIANT.find({ _id: { $in: variantIds } }).select(
-            "_id product name sku"
-          );
+    let variantMap = new Map();
 
-          variantMap = new Map(variants.map((v) => [String(v._id), v]));
+    if (variantIds.length > 0) {
+      const variants = await PRODUCTVARIANT.find({ _id: { $in: variantIds } })
+        .select("_id product name sku")
+        .session(session);
 
-          const missingVariants = variantIds.filter((id) => !variantMap.has(id));
-          if (missingVariants.length) {
-            throw new UserInputError(`Variants not found: ${missingVariants.join(", ")}`);
-          }
-        }
+      variantMap = new Map(variants.map((v) => [String(v._id), v]));
 
-        const items = data.items.map((it, index) => {
-          if (!it.product) {
-            throw new UserInputError(`Item ${index + 1}: product is required`);
-          }
+      const missingVariants = variantIds.filter((id) => !variantMap.has(String(id)));
+      if (missingVariants.length) {
+        throw new UserInputError(`Variants not found: ${missingVariants.join(", ")}`);
+      }
+    }
 
-          if (it.quantity == null || Number(it.quantity) <= 0) {
-            throw new UserInputError(`Item ${index + 1}: quantity must be greater than 0`);
-          }
+    const items = data.items.map((it, index) => {
+      if (!it.product) {
+        throw new UserInputError(`Item ${index + 1}: product is required`);
+      }
 
-          const productDoc = productMap.get(String(it.product));
-          const variantDoc = it.variant ? variantMap.get(String(it.variant)) : null;
+      if (it.quantity == null || Number(it.quantity) <= 0) {
+        throw new UserInputError(`Item ${index + 1}: quantity must be greater than 0`);
+      }
 
-          if (variantDoc && String(variantDoc.product) !== String(it.product)) {
-            throw new UserInputError(`Item ${index + 1}: variant does not belong to product`);
-          }
+      const productDoc = productMap.get(String(it.product));
+      const variantDoc = it.variant ? variantMap.get(String(it.variant)) : null;
 
-          return {
-            product: toId(it.product),
-            productName: productDoc.name,
-            variant: it.variant ? toId(it.variant) : undefined,
-            variantName: variantDoc?.name || "",
-            sku: variantDoc?.sku || productDoc.sku,
-            quantity: Number(it.quantity),
+      if (variantDoc && String(variantDoc.product) !== String(it.product)) {
+        throw new UserInputError(`Item ${index + 1}: variant does not belong to product`);
+      }
 
-            // filled later in PostToStock
-            purchasePrice: undefined,
-            lineTotal: 0,
-            batchNo: undefined,
-            expiryDate: undefined,
-          };
-        });
+      return {
+        product: toId(it.product),
+        productName: productDoc.name,
+        variant: it.variant ? toId(it.variant) : undefined,
+        variantName: variantDoc?.name || "",
+        sku: variantDoc?.sku || productDoc.sku,
+        quantity: Number(it.quantity),
+        purchasePrice: undefined,
+        lineTotal: 0,
+        batchNo: undefined,
+        expiryDate: undefined,
+      };
+    });
 
-        const purchase = await PURCHASE.create({
+    const counter = await COUNTER.findOneAndUpdate(
+      { key: "purchase" },
+      { $inc: { seq: 1 } },
+      {
+        new: true,
+        upsert: true,
+        session,
+      }
+    );
+
+    const purchaseNo = `PUR-${String(counter.seq).padStart(6, "0")}`;
+    const now = new Date();
+
+    const [purchase] = await PURCHASE.create(
+      [
+        {
+          purchaseNo,
           supplierName: data.supplierName,
           invoiceNo: data.invoiceNo,
           warehouse: warehouse._id,
-          purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : new Date(),
+          purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : now,
           status: "draft",
           items,
           subTotal: 0,
@@ -241,34 +262,54 @@ if (!["ADMIN", "MANAGER", "WAREHOUSE"].includes(ctx.user.role)) {
           totalAmount: 0,
           notes: data.notes,
           postedToStock: false,
-          createdBy: ctx.user.id,
-          updatedBy: ctx.user.id,
+          createdBy: ctx.user._id,
+          updatedBy: ctx.user._id,
           payment: {
             status: "unpaid",
             paidAmount: 0,
             balanceAmount: 0,
           },
           statusTimestamps: {
-  draftAt: new Date(),
+            draftAt: now,
+          },
+          statusHistory: [
+            {
+              status: "draft",
+              at: now,
+              by: ctx.user._id,
+              note: "Purchase created",
+            },
+          ],
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return purchase;
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("CreatePurchase error:", err);
+
+    if (err?.code === 11000) {
+      throw new UserInputError("Duplicate purchase number");
+    }
+
+    if (
+      err instanceof UserInputError ||
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(err.message || "Failed to create purchase");
+  }
 },
-
-statusHistory: [
-  {
-    status: "draft",
-    at: new Date(),
-    by: ctx.user._id,
-    note: "Purchase created",
-  },
-],
-
-        });
-
-        return purchase;
-      } catch (err) {
-        console.error("CreatePurchase error:", err);
-        throw new ApolloError(err.message || "Failed to create purchase");
-      }
-    },
 
 UpdatePurchase: async (_, { id, data }, ctx) => {
   try {

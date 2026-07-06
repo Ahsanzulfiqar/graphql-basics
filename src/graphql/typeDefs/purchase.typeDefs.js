@@ -47,6 +47,7 @@ type PurchasePayment {
 }
 
   type Purchase {
+    purchaseNo: String
     _id: ID!
     supplierName: String!
     invoiceNo: String

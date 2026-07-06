@@ -55,6 +55,17 @@ const productSchema = new Schema(
     images: [
       { url: String, alt: String }
     ],
+
+    productType: {
+    type: String,
+    enum: [
+        "INVENTORY",
+        "SERVICE",
+        "EXPENSE"
+    ],
+    default: "INVENTORY"
+}
+
   },
   { timestamps: true }
 );

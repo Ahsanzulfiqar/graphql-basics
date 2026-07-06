@@ -66,6 +66,12 @@ const purchaseSchema = new Schema(
   trim: true,
 
 },
+purchaseNo: {
+  type: String,
+  unique: true,
+  sparse: true,
+  index: true,
+},
 
     warehouse: {
       type: Schema.Types.ObjectId,
@@ -182,7 +188,6 @@ statusHistory: [
 accounting: {
   purchasePosted: { type: Boolean, default: false },
   purchaseVoucher: { type: Schema.Types.ObjectId, ref: "voucher" },
-
   paymentPosted: { type: Boolean, default: false },
   paymentVoucher: { type: Schema.Types.ObjectId, ref: "voucher" },
 },
