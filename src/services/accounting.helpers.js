@@ -374,3 +374,69 @@ export async function postPurchaseVoucher(purchase, user, session) {
 
   return voucher;
 }
+
+export async function postSaleCOGSVoucher(sale, user, session) {
+  if (!sale?._id) {
+    throw new UserInputError("Sale is required");
+  }
+
+  const createdBy = user?._id || user?.id;
+
+  if (!createdBy) {
+    throw new UserInputError("User context is required");
+  }
+
+  if (sale.accounting?.cogsPosted) {
+    throw new UserInputError("Sale COGS already posted to accounts");
+  }
+
+  const existing = await VOUCHER.findOne({
+    sourceType: "SALE_COGS",
+    sourceId: sale._id,
+    status: { $ne: "VOID" },
+  }).session(session);
+
+  if (existing) {
+    throw new UserInputError("Sale COGS voucher already exists");
+  }
+
+  const totalCost = round2(
+    Number(sale.totalCost || 0) ||
+      (sale.items || []).reduce((sum, item) => {
+        return sum + Number(item.lineCost || 0);
+      }, 0)
+  );
+
+  if (totalCost <= 0) {
+    throw new UserInputError("Sale totalCost must be greater than 0 for COGS posting");
+  }
+
+  const cogsAccount = await getAccountByName("Cost of Goods Sold", session);
+  const inventoryAccount = await getAccountByName("Inventory", session);
+
+  return createAccountingVoucher(
+    {
+      date: sale.statusTimestamps?.deliveredAt || new Date(),
+      memo: `Sale COGS posted - ${sale.invoiceNo || sale._id}`,
+      createdBy,
+      sourceType: "SALE_COGS",
+      sourceId: sale._id,
+      paymentMode: null,
+      lines: [
+        {
+          accountId: cogsAccount._id,
+          debit: totalCost,
+          credit: 0,
+          memo: "Cost of goods sold",
+        },
+        {
+          accountId: inventoryAccount._id,
+          debit: 0,
+          credit: totalCost,
+          memo: "Inventory reduced against delivered sale",
+        },
+      ],
+    },
+    session
+  );
+}

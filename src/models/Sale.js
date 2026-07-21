@@ -255,6 +255,9 @@ grossProfit: {
 
   paymentPosted: { type: Boolean, default: false },
   paymentVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
+
+  cogsPosted: { type: Boolean, default: false },
+cogsVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
 },
 
 cancelReason: { type: String, trim: true },

@@ -15,6 +15,7 @@ import PROJECT from "../../models/Project.js";
 import {
   postSaleRevenueVoucher,
   postSalePaymentVoucher,
+   postSaleCOGSVoucher,
 } from "../../services/accounting.helpers.js";
 
 
@@ -977,10 +978,9 @@ sale.updatedBy = ctx.user.id;
 },
 
 
-    MarkDelivered: async (_, { saleId }, ctx) => {
+MarkDelivered: async (_, { saleId }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
 
-  // ✅ Only internal roles should deliver
   if (!["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role)) {
     throw new ForbiddenError("Not allowed to mark delivered");
   }
@@ -994,12 +994,15 @@ sale.updatedBy = ctx.user.id;
     }
 
     const sale = await SALE.findById(saleId).session(session);
-    if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
 
-    // ✅ Flow rule: delivered only from out_for_delivery
-    // (because stock must be reserved on confirmed first)
+    if (!sale || sale.isDeleted) {
+      throw new UserInputError("Sale not found");
+    }
+
     if (sale.status !== "out_for_delivery") {
-      throw new UserInputError("Only out_for_delivery sale can be marked delivered");
+      throw new UserInputError(
+        "Only out_for_delivery sale can be marked delivered"
+      );
     }
 
     if (!sale.items || sale.items.length === 0) {
@@ -1010,48 +1013,81 @@ sale.updatedBy = ctx.user.id;
     const refNo = sale.invoiceNo || String(sale._id);
 
     for (const it of sale.items) {
-      // ✅ 1) Release reserved (variant optional friendly)
-    await releaseReservedStock(
-  {
-    warehouseId: sale.warehouse,
-    productId: it.product,
-    variantId: it.variant || undefined,
-    qty: it.quantity,
-    user: ctx.user,
-  },
-  session
-);
+      const qty = Number(it.quantity || 0);
 
-      // ✅ 2) Consume physical stock (FIFO) (variant optional friendly)
+      if (qty <= 0) {
+        throw new UserInputError("Sale item quantity must be greater than 0");
+      }
+
+      await releaseReservedStock(
+        {
+          warehouseId: sale.warehouse,
+          productId: it.product,
+          variantId: it.variant || undefined,
+          qty,
+          user: ctx.user,
+        },
+        session
+      );
+
       const usedBatches = await fifoConsume(
         {
           warehouseId: sale.warehouse,
           productId: it.product,
           variantId: it.variant || undefined,
-          qty: it.quantity,
+          qty,
         },
         session
       );
 
+      if (!usedBatches || usedBatches.length === 0) {
+        throw new UserInputError("FIFO stock consumption failed");
+      }
 
-it.batches = usedBatches.map((b) => ({
-  batchNo: b.batchNo,
-  expiryDate: b.expiryDate,
-  quantity: Number(b.qtyUsed || 0),
-  costPrice: Number(it.costPrice || 0),
-  lineCost: Number(
-    (Number(b.qtyUsed || 0) * Number(it.costPrice || 0)).toFixed(2)
-  ),
-}));
+      it.batches = usedBatches.map((b) => {
+        const qtyUsed = Number(b.qtyUsed || 0);
 
-      // ✅ 3) Ledger OUT per batch (variant optional)
+        const costPrice = Number(
+          b.costPrice ||
+            b.avgCost ||
+            b.unitCost ||
+            it.costPrice ||
+            0
+        );
+
+        const lineCost = Number((qtyUsed * costPrice).toFixed(2));
+
+        return {
+          batchNo: b.batchNo,
+          expiryDate: b.expiryDate,
+          quantity: qtyUsed,
+          costPrice,
+          lineCost,
+        };
+      });
+
+      const itemLineCost = Number(
+        it.batches
+          .reduce((sum, batch) => sum + Number(batch.lineCost || 0), 0)
+          .toFixed(2)
+      );
+
+      if (itemLineCost <= 0) {
+        throw new UserInputError(
+          "Sale item cost is missing. Cannot post COGS voucher."
+        );
+      }
+
+      it.lineCost = itemLineCost;
+      it.costPrice = Number((itemLineCost / qty).toFixed(2));
+
       for (const b of usedBatches) {
         const row = {
-          sale: sale._id, // if your schema has it
+          sale: sale._id,
           warehouse: sale.warehouse,
           product: it.product,
           quantityIn: 0,
-          quantityOut: b.qtyUsed,
+          quantityOut: Number(b.qtyUsed || 0),
           batchNo: b.batchNo,
           expiryDate: b.expiryDate,
           refType: "SALE",
@@ -1059,7 +1095,9 @@ it.batches = usedBatches.map((b) => ({
           notes: "Delivered sale (FIFO out)",
         };
 
-        if (it.variant) row.variant = it.variant; // ✅ only if exists
+        if (it.variant) {
+          row.variant = it.variant;
+        }
 
         ledgerDocs.push(row);
       }
@@ -1069,55 +1107,117 @@ it.batches = usedBatches.map((b) => ({
       await STOCK_LEDGER.insertMany(ledgerDocs, { session });
     }
 
-    // ✅ Update status + timestamps + history (use your pushHistory)
+    const totalCost = Number(
+      sale.items
+        .reduce((sum, item) => sum + Number(item.lineCost || 0), 0)
+        .toFixed(2)
+    );
+
+    if (totalCost <= 0) {
+      throw new UserInputError(
+        "Sale delivered but total cost is missing. Cannot post COGS voucher."
+      );
+    }
+
+    sale.totalCost = totalCost;
+    sale.grossProfit = Number(
+      (Number(sale.totalAmount || 0) - totalCost).toFixed(2)
+    );
+
     sale.status = "delivered";
 
-    if (!sale.statusTimestamps) sale.statusTimestamps = {};
+    if (!sale.statusTimestamps) {
+      sale.statusTimestamps = {};
+    }
+
     sale.statusTimestamps.deliveredAt = new Date();
+
+    if (!sale.accounting) {
+      sale.accounting = {};
+    }
+
+    if (!sale.accounting.salesPosted) {
+      const salesVoucher = await postSaleRevenueVoucher(
+        sale,
+        ctx.user,
+        session
+      );
+
+      sale.accounting.salesPosted = true;
+      sale.accounting.salesVoucher = salesVoucher._id;
+    }
+
+    if (!sale.accounting.cogsPosted) {
+      const cogsVoucher = await postSaleCOGSVoucher(
+        sale,
+        ctx.user,
+        session
+      );
+
+      sale.accounting.cogsPosted = true;
+      sale.accounting.cogsVoucher = cogsVoucher._id;
+    }
 
     if (typeof pushHistory === "function") {
       pushHistory(sale, {
         status: "delivered",
-        by: ctx.user._id,
+        by: ctx.user._id || ctx.user.id,
         note: "Sale delivered (reserved released + stock consumed)",
       });
     } else {
-      if (!Array.isArray(sale.statusHistory)) sale.statusHistory = [];
+      if (!Array.isArray(sale.statusHistory)) {
+        sale.statusHistory = [];
+      }
+
       sale.statusHistory.push({
         status: "delivered",
         at: new Date(),
-        by: ctx.user._id,
+        by: ctx.user._id || ctx.user.id,
         note: "Sale delivered (reserved released + stock consumed)",
       });
     }
-if (!sale.accounting?.salesPosted) {
 
- 
-  const voucher = await postSaleRevenueVoucher(sale, ctx.user, session);
+    sale.updatedBy = ctx.user._id || ctx.user.id;
 
-  sale.accounting = sale.accounting || {};
-  sale.accounting.salesPosted = true;
-  sale.accounting.salesVoucher = voucher._id;
-}
-sale.updatedBy = ctx.user.id;
     await sale.save({ session });
 
     await session.commitTransaction();
-    session.endSession();
+
     return sale;
   } catch (err) {
     await session.abortTransaction();
+
+    console.error("❌ MarkDelivered Error:", {
+      message: err.message,
+      saleId,
+      userId: ctx.user?._id || ctx.user?.id,
+      stack: err.stack,
+    });
+
+    if (
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError ||
+      err instanceof UserInputError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(
+      err.message || "Failed to mark delivered",
+      "MARK_DELIVERED_FAILED"
+    );
+  } finally {
     session.endSession();
-    throw new ApolloError(err.message || "Failed to mark delivered");
   }
 },
 
 
 
-    CancelSale: async (_, { saleId }, ctx) => {
-  if (!ctx.user) throw new AuthenticationError("Login required");
+CancelSale: async (_, { saleId, cancelReason }, ctx) => {
+  if (!ctx.user) {
+    throw new AuthenticationError("Login required");
+  }
 
-  // ✅ Who can cancel? (adjust if you want SELLER allowed for draft only)
   if (!["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role)) {
     throw new ForbiddenError("Not allowed to cancel sale");
   }
@@ -1130,85 +1230,114 @@ sale.updatedBy = ctx.user.id;
       throw new UserInputError("Invalid saleId");
     }
 
+    const cleanCancelReason = cancelReason?.trim();
+
+    if (!cleanCancelReason) {
+      throw new UserInputError("Cancel reason is required");
+    }
+
     const sale = await SALE.findById(saleId).session(session);
+
     if (!sale || sale.isDeleted) {
       await session.commitTransaction();
-      session.endSession();
       return true;
     }
 
-    // ✅ delivered cannot be cancelled
     if (sale.status === "delivered") {
-      throw new UserInputError("Cannot cancel delivered sale. Use ReturnSale.");
+      throw new UserInputError(
+        "Cannot cancel delivered sale. Use ReturnSale."
+      );
     }
 
-    // already cancelled
+    if (sale.status === "returned") {
+      throw new UserInputError("Returned sale cannot be cancelled");
+    }
+
     if (sale.status === "cancelled") {
       await session.commitTransaction();
-      session.endSession();
       return true;
     }
 
-    // ✅ Release reserved only if it was reserved
-    // Based on your flow: reserve happens at confirmed
-    if (sale.status === "confirmed" || sale.status === "out_for_delivery") {
+    /*
+     * Reserved stock exists only after confirmation.
+     * Release it for confirmed and out_for_delivery sales.
+     */
+    if (
+      sale.status === "confirmed" ||
+      sale.status === "out_for_delivery"
+    ) {
       if (!sale.items || sale.items.length === 0) {
         throw new UserInputError("Sale has no items");
       }
 
       for (const it of sale.items) {
-    await releaseReservedStock(
-  {
-    warehouseId: sale.warehouse,
-    productId: it.product,
-    variantId: it.variant || undefined,
-    qty: it.quantity,
-    user: ctx.user,
-  },
-  session
-);
+        await releaseReservedStock(
+          {
+            warehouseId: sale.warehouse,
+            productId: it.product,
+            variantId: it.variant || undefined,
+            qty: it.quantity,
+          },
+          session
+        );
       }
     }
 
-    // ✅ Status + timestamps + history
-    sale.status = "cancelled";
+    const cancelledAt = new Date();
 
-    if (!sale.statusTimestamps) sale.statusTimestamps = {};
-    sale.statusTimestamps.cancelledAt = new Date();
+    sale.status = "cancelled";
+    sale.cancelReason = cleanCancelReason;
+
+    if (!sale.statusTimestamps) {
+      sale.statusTimestamps = {};
+    }
+
+    sale.statusTimestamps.cancelledAt = cancelledAt;
+
+    const historyNote =
+      `Sale cancelled. Reason: ${cleanCancelReason}`;
 
     if (typeof pushHistory === "function") {
       pushHistory(sale, {
         status: "cancelled",
         by: ctx.user._id,
-        note: "Sale cancelled",
+        note: historyNote,
       });
     } else {
-      if (!Array.isArray(sale.statusHistory)) sale.statusHistory = [];
+      if (!Array.isArray(sale.statusHistory)) {
+        sale.statusHistory = [];
+      }
+
       sale.statusHistory.push({
         status: "cancelled",
-        at: new Date(),
+        at: cancelledAt,
         by: ctx.user._id,
-        note: "Sale cancelled",
+        note: historyNote,
       });
     }
 
     await sale.save({ session });
 
     await session.commitTransaction();
-    session.endSession();
+
     return true;
   } catch (err) {
     await session.abortTransaction();
+
+    throw new ApolloError(
+      err.message || "Failed to cancel sale"
+    );
+  } finally {
     session.endSession();
-    throw new ApolloError(err.message || "Failed to cancel sale");
   }
 },
 
 
-    ReturnSale: async (_, { saleId }, ctx) => {
-  if (!ctx.user) throw new AuthenticationError("Login required");
+ReturnSale: async (_, { saleId, returnReason }, ctx) => {
+  if (!ctx.user) {
+    throw new AuthenticationError("Login required");
+  }
 
-  // ✅ Only internal roles should process returns
   if (!["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role)) {
     throw new ForbiddenError("Not allowed to return sale");
   }
@@ -1221,42 +1350,87 @@ sale.updatedBy = ctx.user.id;
       throw new UserInputError("Invalid saleId");
     }
 
-    const sale = await SALE.findById(saleId).session(session);
-    if (!sale || sale.isDeleted) throw new UserInputError("Sale not found");
+    const cleanReturnReason = returnReason?.trim();
 
-    // ✅ Flow rule: only delivered -> returned
-    if (sale.status !== "delivered") {
-      throw new UserInputError("Only delivered sale can be returned");
+    if (!cleanReturnReason) {
+      throw new UserInputError("Return reason is required");
     }
 
-    // ✅ Fetch SALE ledger rows (best: by sale field)
-    let saleOutRows = await STOCK_LEDGER.find({ refType: "SALE", sale: sale._id })
+    const sale = await SALE.findById(saleId).session(session);
+
+    if (!sale || sale.isDeleted) {
+      throw new UserInputError("Sale not found");
+    }
+
+    // Only delivered sales can be returned
+    if (sale.status !== "delivered") {
+      throw new UserInputError(
+        "Only delivered sale can be returned"
+      );
+    }
+
+    /*
+     * Fetch the stock ledger entries created when
+     * this sale was delivered.
+     */
+    let saleOutRows = await STOCK_LEDGER.find({
+      refType: "SALE",
+      sale: sale._id,
+      quantityOut: { $gt: 0 },
+    })
       .session(session)
       .lean();
 
-    // fallback: by refNo
+    // Fallback for older ledger records
     if (!saleOutRows.length) {
       const refNo = sale.invoiceNo || String(sale._id);
-      saleOutRows = await STOCK_LEDGER.find({ refType: "SALE", refNo }).session(session).lean();
+
+      saleOutRows = await STOCK_LEDGER.find({
+        refType: "SALE",
+        refNo,
+        quantityOut: { $gt: 0 },
+      })
+        .session(session)
+        .lean();
     }
 
     if (!saleOutRows.length) {
-      throw new UserInputError("Sale ledger not found. Cannot return safely.");
+      throw new UserInputError(
+        "Sale ledger not found. Cannot return safely."
+      );
+    }
+
+    /*
+     * Prevent stock from being returned twice.
+     */
+    const existingReturn = await STOCK_LEDGER.findOne({
+      refType: "SALE_RETURN",
+      sale: sale._id,
+    }).session(session);
+
+    if (existingReturn) {
+      throw new UserInputError(
+        "This sale stock has already been returned"
+      );
     }
 
     const returnLedgerDocs = [];
-    const returnRef = `RET-${sale.invoiceNo || String(sale._id)}`;
+
+    const returnRef = `RET-${
+      sale.invoiceNo || String(sale._id)
+    }`;
 
     for (const row of saleOutRows) {
       const qty = Number(row.quantityOut || 0);
-      if (!qty) continue;
 
-      // ✅ Add stock back to the SAME batch consumed during delivery
+      if (qty <= 0) continue;
+
+      // Add stock back to the same batch consumed on delivery
       await addBackToBatch(
         {
           warehouseId: row.warehouse,
           productId: row.product,
-          variantId: row.variant || undefined, // ✅ optional variant friendly
+          variantId: row.variant || undefined,
           qty,
           batchNo: row.batchNo,
           expiryDate: row.expiryDate,
@@ -1264,63 +1438,90 @@ sale.updatedBy = ctx.user.id;
         session
       );
 
-      // ✅ Return ledger entry (variant optional)
       const entry = {
         sale: sale._id,
         warehouse: row.warehouse,
         product: row.product,
+
         quantityIn: qty,
         quantityOut: 0,
+
         batchNo: row.batchNo,
         expiryDate: row.expiryDate,
+
         refType: "SALE_RETURN",
         refNo: returnRef,
-        notes: "Return against delivered sale",
+
+        notes: `Sale returned. Reason: ${cleanReturnReason}`,
       };
 
-      if (row.variant) entry.variant = row.variant; // ✅ only if exists
+      if (row.variant) {
+        entry.variant = row.variant;
+      }
 
       returnLedgerDocs.push(entry);
     }
 
-    if (returnLedgerDocs.length) {
-      await STOCK_LEDGER.insertMany(returnLedgerDocs, { session });
+    if (!returnLedgerDocs.length) {
+      throw new UserInputError(
+        "No stock quantity found to return"
+      );
     }
 
-    // ✅ Update status + timestamps + history
-    sale.status = "returned";
+    await STOCK_LEDGER.insertMany(returnLedgerDocs, {
+      session,
+    });
 
-    if (!sale.statusTimestamps) sale.statusTimestamps = {};
-    sale.statusTimestamps.returnedAt = new Date();
+    const returnedAt = new Date();
+
+    // Update sale
+    sale.status = "returned";
+    sale.returnReason = cleanReturnReason;
+
+    if (!sale.statusTimestamps) {
+      sale.statusTimestamps = {};
+    }
+
+    sale.statusTimestamps.returnedAt = returnedAt;
+
+    const historyNote =
+      `Sale returned and stock added back. ` +
+      `Reason: ${cleanReturnReason}`;
 
     if (typeof pushHistory === "function") {
       pushHistory(sale, {
         status: "returned",
         by: ctx.user._id,
-        note: "Sale returned (stock added back)",
+        note: historyNote,
       });
     } else {
-      if (!Array.isArray(sale.statusHistory)) sale.statusHistory = [];
+      if (!Array.isArray(sale.statusHistory)) {
+        sale.statusHistory = [];
+      }
+
       sale.statusHistory.push({
         status: "returned",
-        at: new Date(),
+        at: returnedAt,
         by: ctx.user._id,
-        note: "Sale returned (stock added back)",
+        note: historyNote,
       });
     }
 
     await sale.save({ session });
 
     await session.commitTransaction();
-    session.endSession();
+
     return sale;
   } catch (err) {
     await session.abortTransaction();
+
+    throw new ApolloError(
+      err.message || "Failed to return sale"
+    );
+  } finally {
     session.endSession();
-    throw new ApolloError(err.message || "Failed to return sale");
   }
 },
-
 
 MarkSalePaid: async (_, { saleId, payment }, ctx) => {
   if (!ctx.user) throw new AuthenticationError("Login required");
@@ -1402,6 +1603,534 @@ MarkSalePaid: async (_, { saleId, payment }, ctx) => {
     throw new ApolloError(err.message || "Failed to mark sale paid");
   }
 },
+
+UpdateSale: async (_, { saleId, data }, ctx) => {
+  if (!ctx.user) {
+    throw new AuthenticationError("Login required");
+  }
+
+  const role = ctx.user.role;
+
+  if (!["ADMIN", "MANAGER", "SALES", "SELLER"].includes(role)) {
+    throw new ForbiddenError("Not allowed to update sale");
+  }
+
+  const isAdminOrManager = ["ADMIN", "MANAGER"].includes(role);
+  const isSellerOrSales = ["SELLER", "SALES"].includes(role);
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(saleId)) {
+      throw new UserInputError("Invalid saleId");
+    }
+
+    if (!data || Object.keys(data).length === 0) {
+      throw new UserInputError("Update data is required");
+    }
+
+    const sale = await SALE.findById(saleId).session(session);
+
+    if (!sale || sale.isDeleted) {
+      throw new UserInputError("Sale not found");
+    }
+
+    /*
+     * Status based protection
+     */
+    if (["delivered", "cancelled", "returned"].includes(sale.status)) {
+      throw new UserInputError(
+        `${sale.status} sale cannot be updated`
+      );
+    }
+
+    /*
+     * SELLER / SALES can update only draft sale
+     */
+    if (isSellerOrSales && !isAdminOrManager) {
+      if (sale.status !== "draft") {
+        throw new ForbiddenError(
+          "Seller can update only draft sale"
+        );
+      }
+
+      /*
+       * Seller/Sales can update only his own sale
+       */
+      if (
+        sale.seller &&
+        String(sale.seller) !== String(ctx.user._id)
+      ) {
+        throw new ForbiddenError(
+          "You can update only your own sale"
+        );
+      }
+    }
+
+    /*
+     * Confirmed sale can be updated only by Admin / Manager
+     */
+    if (sale.status === "confirmed" && !isAdminOrManager) {
+      throw new ForbiddenError(
+        "Only Admin or Manager can update confirmed sale"
+      );
+    }
+
+    /*
+     * Confirmed sale inventory fields are locked.
+     * Because confirmed sale already has reserved stock.
+     */
+    if (sale.status === "confirmed") {
+      const blockedFields = [];
+
+      if (data.items !== undefined) blockedFields.push("items");
+      if (data.warehouseId !== undefined) blockedFields.push("warehouseId");
+      if (data.projectId !== undefined) blockedFields.push("projectId");
+      if (data.sellerId !== undefined) blockedFields.push("sellerId");
+
+      if (blockedFields.length) {
+        throw new UserInputError(
+          `Cannot update ${blockedFields.join(
+            ", "
+          )} after sale is confirmed. Cancel sale or move it back to draft first.`
+        );
+      }
+    }
+
+    /*
+     * Draft sale full validations
+     */
+    if (sale.status === "draft") {
+      const nextProjectId = data.projectId || sale.project;
+      const nextSellerId = data.sellerId || sale.seller;
+      const nextWarehouseId = data.warehouseId || sale.warehouse;
+
+      if (!nextProjectId) {
+        throw new UserInputError("Project is required");
+      }
+
+      if (!nextSellerId) {
+        throw new UserInputError("Seller is required");
+      }
+
+      if (!nextWarehouseId) {
+        throw new UserInputError("Warehouse is required");
+      }
+
+      if (!mongoose.Types.ObjectId.isValid(nextProjectId)) {
+        throw new UserInputError("Invalid projectId");
+      }
+
+      if (!mongoose.Types.ObjectId.isValid(nextSellerId)) {
+        throw new UserInputError("Invalid sellerId");
+      }
+
+      if (!mongoose.Types.ObjectId.isValid(nextWarehouseId)) {
+        throw new UserInputError("Invalid warehouseId");
+      }
+
+      const project = await PROJECT.findOne({
+        _id: nextProjectId,
+        isActive: true,
+      }).session(session);
+
+      if (!project) {
+        throw new UserInputError("Project not found or inactive");
+      }
+
+      const seller = await USER.findOne({
+        _id: nextSellerId,
+        role: { $in: ["SELLER", "SALES"] },
+        isDeleted: { $ne: true },
+      }).session(session);
+
+      if (!seller) {
+        throw new UserInputError("Seller not found");
+      }
+
+      const warehouse = await WAREHOUSE.findOne({
+        _id: nextWarehouseId,
+        isDeleted: { $ne: true },
+      }).session(session);
+
+      if (!warehouse) {
+        throw new UserInputError("Warehouse not found");
+      }
+
+      /*
+       * Project warehouse validation
+       */
+      if (
+        Array.isArray(project.warehouses) &&
+        project.warehouses.length > 0
+      ) {
+        const warehouseAllowed = project.warehouses.some(
+          (w) => String(w) === String(nextWarehouseId)
+        );
+
+        if (!warehouseAllowed) {
+          throw new UserInputError(
+            "Selected warehouse is not allowed for this project"
+          );
+        }
+      }
+
+      /*
+       * Project seller validation.
+       * Supports both project.seller and old project.sellers[] shape.
+       */
+      if (project.seller) {
+        if (String(project.seller) !== String(nextSellerId)) {
+          throw new UserInputError(
+            "Selected seller is not assigned to this project"
+          );
+        }
+      }
+
+      if (
+        Array.isArray(project.sellers) &&
+        project.sellers.length > 0
+      ) {
+        const sellerAllowed = project.sellers.some(
+          (s) => String(s) === String(nextSellerId)
+        );
+
+        if (!sellerAllowed) {
+          throw new UserInputError(
+            "Selected seller is not assigned to this project"
+          );
+        }
+      }
+
+      sale.project = nextProjectId;
+      sale.seller = nextSellerId;
+      sale.warehouse = nextWarehouseId;
+    }
+
+    /*
+     * Basic fields: allowed for draft and confirmed
+     */
+    if (data.customerName !== undefined) {
+      sale.customerName = data.customerName?.trim();
+    }
+
+    if (data.phone !== undefined) {
+      sale.phone = data.phone?.trim();
+    }
+
+    if (data.country !== undefined) {
+      sale.country = data.country?.trim();
+    }
+
+    if (data.city !== undefined) {
+      sale.city = data.city?.trim();
+    }
+
+    if (data.address !== undefined) {
+      sale.address = data.address?.trim();
+    }
+
+    if (data.notes !== undefined) {
+      sale.notes = data.notes?.trim();
+    }
+
+    if (data.discount !== undefined) {
+      const discount = Number(data.discount);
+
+      if (Number.isNaN(discount) || discount < 0) {
+        throw new UserInputError("Discount cannot be negative");
+      }
+
+      sale.discount = discount;
+    }
+
+    if (data.deliveryCharges !== undefined) {
+      const deliveryCharges = Number(data.deliveryCharges);
+
+      if (Number.isNaN(deliveryCharges) || deliveryCharges < 0) {
+        throw new UserInputError("Delivery charges cannot be negative");
+      }
+
+      sale.deliveryCharges = deliveryCharges;
+    }
+
+    if (data.paymentMode !== undefined) {
+      if (!sale.payment) sale.payment = {};
+      sale.payment.mode = data.paymentMode;
+    }
+
+    /*
+     * Courier fields: allowed for draft and confirmed
+     */
+    if (
+      data.courierId !== undefined ||
+      data.courierName !== undefined ||
+      data.trackingNo !== undefined
+    ) {
+      if (!sale.courier) sale.courier = {};
+
+      if (data.courierId !== undefined) {
+        if (
+          data.courierId &&
+          !mongoose.Types.ObjectId.isValid(data.courierId)
+        ) {
+          throw new UserInputError("Invalid courierId");
+        }
+
+        sale.courier.courierId = data.courierId || null;
+      }
+
+      if (data.courierName !== undefined) {
+        sale.courier.courierName = data.courierName?.trim();
+      }
+
+      if (data.trackingNo !== undefined) {
+        sale.courier.trackingNo = data.trackingNo?.trim();
+      }
+    }
+
+    /*
+     * Items can be updated only in draft sale
+     */
+    if (data.items !== undefined) {
+      if (sale.status !== "draft") {
+        throw new UserInputError(
+          "Items can be updated only in draft sale"
+        );
+      }
+
+      if (!Array.isArray(data.items) || data.items.length === 0) {
+        throw new UserInputError(
+          "At least one sale item is required"
+        );
+      }
+
+      const updatedItems = [];
+      const stockQtyMap = new Map();
+
+      let subtotal = 0;
+      let totalCost = 0;
+
+      for (const item of data.items) {
+        if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+          throw new UserInputError("Invalid productId");
+        }
+
+        const quantity = Number(item.quantity);
+        const salePrice = Number(item.salePrice);
+
+        if (Number.isNaN(quantity) || quantity <= 0) {
+          throw new UserInputError(
+            "Item quantity must be greater than 0"
+          );
+        }
+
+        if (Number.isNaN(salePrice) || salePrice < 0) {
+          throw new UserInputError(
+            "Sale price cannot be negative"
+          );
+        }
+
+        const product = await PRODUCT.findOne({
+          _id: item.productId,
+          isDeleted: { $ne: true },
+        }).session(session);
+
+        if (!product) {
+          throw new UserInputError("Product not found");
+        }
+
+        let variantId = undefined;
+        let variant = null;
+
+        if (item.variantId) {
+          if (!mongoose.Types.ObjectId.isValid(item.variantId)) {
+            throw new UserInputError("Invalid variantId");
+          }
+
+          variantId = new mongoose.Types.ObjectId(item.variantId);
+
+          /*
+           * If you have PRODUCT_VARIANT model, keep this validation.
+           * If your variant is embedded inside Product, adjust here.
+           */
+          if (typeof PRODUCT_VARIANT !== "undefined") {
+            variant = await PRODUCT_VARIANT.findOne({
+              _id: variantId,
+              product: product._id,
+              isDeleted: { $ne: true },
+            }).session(session);
+
+            if (!variant) {
+              throw new UserInputError(
+                `Variant not found for ${product.name}`
+              );
+            }
+          }
+        }
+
+        const stockQuery = {
+          warehouse: sale.warehouse,
+          product: product._id,
+        };
+
+        if (variantId) {
+          stockQuery.variant = variantId;
+        } else {
+          stockQuery.$or = [
+            { variant: { $exists: false } },
+            { variant: null },
+          ];
+        }
+
+        const stock = await WAREHOUSE_STOCK.findOne(stockQuery)
+          .session(session)
+          .lean();
+
+        if (!stock) {
+          throw new UserInputError(
+            `Stock record not found for ${product.name}`
+          );
+        }
+
+        const availableQty =
+          Number(stock.quantity || 0) -
+          Number(stock.reservedQuantity || 0);
+
+        const stockKey = `${String(product._id)}-${
+          variantId ? String(variantId) : "no_variant"
+        }`;
+
+        const alreadyRequested = stockQtyMap.get(stockKey) || 0;
+        const totalRequested = alreadyRequested + quantity;
+
+        if (totalRequested > availableQty) {
+          throw new UserInputError(
+            `Insufficient available stock for ${product.name}. Available: ${availableQty}`
+          );
+        }
+
+        stockQtyMap.set(stockKey, totalRequested);
+
+        const costPrice = Number(stock.avgCost || 0);
+        const lineTotal = quantity * salePrice;
+        const lineCost = quantity * costPrice;
+
+        subtotal += lineTotal;
+        totalCost += lineCost;
+
+        updatedItems.push({
+          product: product._id,
+          variant: variantId || undefined,
+
+          productName: product.name,
+          sku: variant?.sku || product.sku,
+
+          quantity,
+          salePrice,
+          lineTotal: Number(lineTotal.toFixed(2)),
+
+          costPrice: Number(costPrice.toFixed(2)),
+          lineCost: Number(lineCost.toFixed(2)),
+        });
+      }
+
+      sale.items = updatedItems;
+      sale.subtotal = Number(subtotal.toFixed(2));
+      sale.totalCost = Number(totalCost.toFixed(2));
+      sale.grossProfit = Number((subtotal - totalCost).toFixed(2));
+    }
+
+    /*
+     * Recalculate totals after any discount / delivery / item update
+     */
+    const subtotal = Number(sale.subtotal || 0);
+    const discount = Number(sale.discount || 0);
+    const deliveryCharges = Number(sale.deliveryCharges || 0);
+
+    const totalAmount = subtotal - discount + deliveryCharges;
+
+    if (totalAmount < 0) {
+      throw new UserInputError(
+        "Sale total cannot be negative"
+      );
+    }
+
+    sale.totalAmount = Number(totalAmount.toFixed(2));
+
+    /*
+     * Keep payment balance updated.
+     * If your Sale model pre-save hook already does this,
+     * this still does not disturb it.
+     */
+    if (!sale.payment) sale.payment = {};
+
+    const paidAmount = Number(sale.payment.paidAmount || 0);
+    const balanceAmount = sale.totalAmount - paidAmount;
+
+    sale.payment.balanceAmount = Number(
+      Math.max(balanceAmount, 0).toFixed(2)
+    );
+
+    if (paidAmount <= 0) {
+      sale.payment.status = "unpaid";
+    } else if (paidAmount >= sale.totalAmount) {
+      sale.payment.status = "paid";
+    } else {
+      sale.payment.status = "partial";
+    }
+
+    /*
+     * History
+     */
+    const updatedAt = new Date();
+
+    if (typeof pushHistory === "function") {
+      pushHistory(sale, {
+        status: sale.status,
+        by: ctx.user._id,
+        note: `Sale updated by ${role}`,
+      });
+    } else {
+      if (!Array.isArray(sale.statusHistory)) {
+        sale.statusHistory = [];
+      }
+
+      sale.statusHistory.push({
+        status: sale.status,
+        at: updatedAt,
+        by: ctx.user._id,
+        note: `Sale updated by ${role}`,
+      });
+    }
+
+    await sale.save({ session });
+
+    await session.commitTransaction();
+
+    return sale;
+  } catch (err) {
+    await session.abortTransaction();
+
+    if (
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError ||
+      err instanceof UserInputError
+    ) {
+      throw err;
+    }
+
+    console.error("UpdateSale Error:", err);
+
+    throw new ApolloError(
+      err.message || "Failed to update sale"
+    );
+  } finally {
+    session.endSession();
+  }
+},
+
 
   },
 }; 

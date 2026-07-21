@@ -41,6 +41,7 @@ const voucherLineSchema = new mongoose.Schema(
     "PURCHASE_PAYMENT",
     "MONEY_IN",
     "MONEY_OUT",
+    "SALE_COGS",
   ],
   default: "MANUAL",
 },

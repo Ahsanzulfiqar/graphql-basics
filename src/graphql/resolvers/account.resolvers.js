@@ -402,6 +402,14 @@ GetTrialBalance: async (_, { from, to }, ctx) => {
           parentId: expenses._id,
         });
 
+        await createIfMissing({
+  code: "5060",
+  name: "Cost of Goods Sold",
+  type: "EXPENSE",
+  parentId: expenses._id,
+});
+
+
         return await ACCOUNT.find({
           isDeleted: { $ne: true },
         }).sort({ code: 1 });

@@ -64,6 +64,7 @@ transfer: {
     "OPENING",
     "TRANSFER_IN",
     "TRANSFER_OUT",
+    "COST_REVALUATION",
   ],
   default: "PURCHASE",
   index: true,

@@ -16,9 +16,16 @@ type Mutation {
   ConfirmSale(saleId: ID!): Sale!
   MarkOutForDelivery(saleId: ID!, data: OutForDeliveryInput!): Sale!
   MarkDelivered(saleId: ID!): Sale!
-CancelSale(saleId: ID!, reason: String): Boolean!
-ReturnSale(saleId: ID!, reason: String): Sale!
+CancelSale(saleId: ID!, cancelReason: String): Boolean!
+ReturnSale(
+  saleId: ID!
+  returnReason: String
+): Sale!
   MarkSalePaid(saleId: ID!, payment: PaymentInput!): Sale!
+  UpdateSale(
+    saleId: ID!
+    data: UpdateSaleInput!
+  ): Sale!
 }
 
 
@@ -276,6 +283,38 @@ type StatusBreakdown {
   orders: Int!
   revenue: Float!
 }
+
+input UpdateSaleItemInput {
+  productId: ID!
+  variantId: ID
+  quantity: Float!
+  salePrice: Float!
+}
+
+input UpdateSaleInput {
+  projectId: ID
+  sellerId: ID
+  warehouseId: ID
+
+  customerName: String
+  phone: String
+  country: String
+  city: String
+  address: String
+
+  items: [UpdateSaleItemInput!]
+
+  discount: Float
+  deliveryCharges: Float
+  notes: String
+
+  paymentMode: String
+
+  courierId: ID
+  courierName: String
+  trackingNo: String
+}
+
 
 `
 
