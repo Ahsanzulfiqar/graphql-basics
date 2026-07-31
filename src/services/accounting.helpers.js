@@ -460,9 +460,11 @@ export async function postSaleCourierExpenseVoucher(sale, user, session) {
     throw new UserInputError("Courier charge must be greater than 0");
   }
 
-  if (sale.courier?.chargeStatus !== "CONFIRMED") {
-    throw new UserInputError("Courier charge must be confirmed before posting");
-  }
+
+  if (!["CONFIRMED", "ADJUSTED"].includes(sale.courier?.chargeStatus)) {
+  throw new UserInputError("Courier charge must be confirmed before posting");
+}
+
 
   const alreadyPostedAmount = round2(
     sale.accounting?.courierExpenseAmount || 0

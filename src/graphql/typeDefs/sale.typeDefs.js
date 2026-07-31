@@ -182,8 +182,6 @@ input CreateSaleInput {
 }
 
 
-x
-
 
  # ✅ Updated OutForDelivery input to use courierId + optional COD logic
   input OutForDeliveryInput {
