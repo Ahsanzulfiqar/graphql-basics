@@ -350,6 +350,13 @@ GetTrialBalance: async (_, { from, to }, ctx) => {
           parentId: liabilities._id,
         });
 
+        await createIfMissing({
+  code: "2020",
+  name: "Courier Payable",
+  type: "LIABILITY",
+  parentId: liabilities._id,
+});
+
         // Equity Children
         await createIfMissing({
           code: "3010",

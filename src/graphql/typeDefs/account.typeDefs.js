@@ -81,6 +81,7 @@ const accountTypeDefs = gql`
   SALES_RETURN
   PURCHASE_RETURN
   SALE_COGS
+  SALE_COURIER
 }
 
 

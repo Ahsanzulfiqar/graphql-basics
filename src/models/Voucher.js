@@ -58,6 +58,7 @@ sourceType: {
     "SALES_RETURN",
     "PURCHASE_RETURN",
     "SALE_COGS",
+    "SALE_COURIER"
   ],
   default: "MANUAL",
 },

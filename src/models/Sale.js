@@ -138,17 +138,47 @@ grossProfit: {
     deliveryNotes: { type: String, trim: true },
     shippedAt: { type: Date },
 
+  
+
     courier: {
-      courierId: { type: Schema.Types.ObjectId, ref: "courier" },
-      courierName: String,
-      charges: {
-        baseCharge: { type: Number, default: 0 },
-        codCharge: { type: Number, default: 0 },
-        returnCharge: { type: Number, default: 0 },
-      },
-      trackingNo: String,
-      trackingUrl: String,
-    },
+  courierId: { type: Schema.Types.ObjectId, ref: "courier" },
+  courierName: String,
+
+  // UNKNOWN when sent; NORMAL/REMOTE after courier confirms
+  remoteAreaStatus: {
+    type: String,
+    enum: ["UNKNOWN", "NORMAL", "REMOTE"],
+    default: "UNKNOWN",
+  },
+
+  // ESTIMATED at out_for_delivery; CONFIRMED after update
+  chargeStatus: {
+    type: String,
+    enum: ["ESTIMATED", "CONFIRMED", "ADJUSTED"],
+    default: "ESTIMATED",
+  },
+
+  charges: {
+    baseCharge: { type: Number, default: 0 },
+    codCharge: { type: Number, default: 0 },
+
+    // entered later if courier says remote area
+    remoteCharge: { type: Number, default: 0 },
+
+    // base + cod + remote
+    totalCourierCharge: { type: Number, default: 0 },
+
+    returnCharge: { type: Number, default: 0 },
+  },
+
+  chargeUpdatedAt: Date,
+  chargeUpdatedBy: { type: Schema.Types.ObjectId, ref: "user" },
+  chargeNote: { type: String, trim: true },
+
+  trackingNo: String,
+  trackingUrl: String,
+},
+
 
     status: {
       type: String,
@@ -249,17 +279,20 @@ grossProfit: {
       },
     },
 
-    accounting: {
+accounting: {
   salesPosted: { type: Boolean, default: false },
-  salesVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
+  salesVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "voucher" },
 
   paymentPosted: { type: Boolean, default: false },
-  paymentVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
+  paymentVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "voucher" },
 
   cogsPosted: { type: Boolean, default: false },
-cogsVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher" },
-},
+  cogsVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "voucher" },
 
+  courierExpensePosted: { type: Boolean, default: false },
+  courierExpenseVoucher: { type: mongoose.Schema.Types.ObjectId, ref: "voucher" },
+  courierExpenseAmount: { type: Number, default: 0 },
+},
 cancelReason: { type: String, trim: true },
 returnReason: { type: String, trim: true },
 

@@ -15,7 +15,8 @@ import PROJECT from "../../models/Project.js";
 import {
   postSaleRevenueVoucher,
   postSalePaymentVoucher,
-   postSaleCOGSVoucher,
+  postSaleCOGSVoucher,
+  postSaleCourierExpenseVoucher,
 } from "../../services/accounting.helpers.js";
 
 
@@ -920,25 +921,39 @@ sale.updatedBy = ctx.user.id;
       throw new UserInputError("Courier not found or inactive");
     }
 
-    const isCOD = data?.isCOD === true;
+const isCOD = data?.isCOD === true;
 
-    // ✅ copy charges snapshot (round to 2 decimals)
-    const baseCharge = Number(((courier.charges?.baseCharge ?? 0)).toFixed(2));
-    const codCharge = Number((isCOD ? (courier.charges?.codCharge ?? 0) : 0).toFixed(2));
-    const returnCharge = Number(((courier.charges?.returnCharge ?? 0)).toFixed(2));
+const round2 = (n) => Number(Number(n || 0).toFixed(2));
 
-    // ✅ set nested courier block (your new schema)
-    sale.courier = {
-      courierId: courier._id,
-      courierName: courier.name,
-      charges: {
-        baseCharge,
-        codCharge,
-        returnCharge,
-      },
-      trackingNo: data.trackingNo.trim(),
-      trackingUrl: data.trackingUrl?.trim(),
-    };
+const baseCharge = round2(courier.charges?.baseCharge || 0);
+const codCharge = isCOD ? round2(courier.charges?.codCharge || 0) : 0;
+const returnCharge = round2(courier.charges?.returnCharge || 0);
+
+// Normal charge is saved by default
+const remoteCharge = 0;
+const totalCourierCharge = round2(baseCharge + codCharge);
+
+sale.courier = {
+  courierId: courier._id,
+  courierName: courier.name,
+
+  // Default assumption: normal area
+  remoteAreaStatus: "NORMAL",
+
+  // Normal charge is confirmed automatically
+  chargeStatus: "CONFIRMED",
+
+  charges: {
+    baseCharge,
+    codCharge,
+    remoteCharge,
+    totalCourierCharge,
+    returnCharge,
+  },
+
+  trackingNo: data.trackingNo.trim(),
+  trackingUrl: data.trackingUrl?.trim(),
+};
 
     // Optional additional fields (only if you still keep them)
     if (data.deliveryNotes !== undefined) sale.deliveryNotes = data.deliveryNotes?.trim();
@@ -976,6 +991,186 @@ sale.updatedBy = ctx.user.id;
     throw new ApolloError(err.message || "Failed to mark out for delivery");
   }
 },
+
+
+UpdateCourierCharges: async (_, { saleId, data }, ctx) => {
+  if (!ctx.user) {
+    throw new AuthenticationError("Login required");
+  }
+
+  if (!["ADMIN", "MANAGER", "SALES"].includes(ctx.user.role)) {
+    throw new ForbiddenError("Not allowed to update courier charges");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(saleId)) {
+      throw new UserInputError("Invalid saleId");
+    }
+
+    const sale = await SALE.findById(saleId).session(session);
+
+    if (!sale || sale.isDeleted) {
+      throw new UserInputError("Sale not found");
+    }
+
+    if (!sale.courier?.courierId) {
+      throw new UserInputError("Courier is not assigned to this sale");
+    }
+
+    if (!["out_for_delivery", "delivered"].includes(sale.status)) {
+      throw new UserInputError(
+        "Courier charges can be updated only after sale is out for delivery"
+      );
+    }
+
+    const remoteAreaStatus = String(data.remoteAreaStatus || "").toUpperCase();
+
+    if (!["NORMAL", "REMOTE"].includes(remoteAreaStatus)) {
+      throw new UserInputError("remoteAreaStatus must be NORMAL or REMOTE");
+    }
+
+    const round2 = (n) => Number(Number(n || 0).toFixed(2));
+
+    const oldTotalCourierCharge = round2(
+      sale.courier?.charges?.totalCourierCharge || 0
+    );
+
+    const oldPostedCourierAmount = round2(
+      sale.accounting?.courierExpenseAmount || 0
+    );
+
+    const baseCharge = round2(sale.courier?.charges?.baseCharge || 0);
+    const codCharge = round2(sale.courier?.charges?.codCharge || 0);
+    const returnCharge = round2(sale.courier?.charges?.returnCharge || 0);
+
+    const remoteCharge =
+      remoteAreaStatus === "REMOTE" ? round2(data.remoteCharge || 0) : 0;
+
+    if (remoteAreaStatus === "REMOTE" && remoteCharge <= 0) {
+      throw new UserInputError("Remote charge is required for remote area");
+    }
+
+    const totalCourierCharge = round2(baseCharge + codCharge + remoteCharge);
+
+    if (totalCourierCharge <= 0) {
+      throw new UserInputError("Total courier charge must be greater than 0");
+    }
+
+    sale.courier.remoteAreaStatus = remoteAreaStatus;
+
+    /*
+     * Normal charge was already confirmed at MarkOutForDelivery.
+     * If user is running this mutation, it usually means courier charge changed later.
+     */
+    const chargeChanged = totalCourierCharge !== oldTotalCourierCharge;
+
+    sale.courier.chargeStatus = chargeChanged ? "ADJUSTED" : "CONFIRMED";
+
+    sale.courier.charges = {
+      baseCharge,
+      codCharge,
+      remoteCharge,
+      totalCourierCharge,
+      returnCharge,
+    };
+
+    sale.courier.chargeUpdatedAt = new Date();
+    sale.courier.chargeUpdatedBy = ctx.user._id || ctx.user.id;
+    sale.courier.chargeNote =
+      data.chargeNote?.trim() ||
+      (remoteAreaStatus === "REMOTE"
+        ? "Remote courier charge added"
+        : "Courier charge confirmed");
+
+    if (!sale.accounting) {
+      sale.accounting = {};
+    }
+
+    /*
+     * Accounting rule:
+     *
+     * 1. If sale is still out_for_delivery:
+     *    - Only update courier charges.
+     *    - MarkDelivered will post courier expense later.
+     *
+     * 2. If sale is already delivered:
+     *    - If courier expense was not posted yet, post full amount.
+     *    - If already posted and charge changed, post only difference.
+     */
+    if (sale.status === "delivered") {
+      const accountingDifference = round2(
+        totalCourierCharge - oldPostedCourierAmount
+      );
+
+      if (accountingDifference !== 0) {
+        const voucher = await postSaleCourierExpenseVoucher(
+          sale,
+          ctx.user,
+          session
+        );
+
+        sale.accounting.courierExpensePosted = true;
+        sale.accounting.courierExpenseVoucher = voucher._id;
+        sale.accounting.courierExpenseAmount = totalCourierCharge;
+      }
+    }
+
+    if (typeof pushHistory === "function") {
+      pushHistory(sale, {
+        status: sale.status,
+        by: ctx.user._id || ctx.user.id,
+        note: `Courier charges updated: ${remoteAreaStatus}, Total: ${totalCourierCharge}`,
+      });
+    } else {
+      if (!Array.isArray(sale.statusHistory)) {
+        sale.statusHistory = [];
+      }
+
+      sale.statusHistory.push({
+        status: sale.status,
+        at: new Date(),
+        by: ctx.user._id || ctx.user.id,
+        note: `Courier charges updated: ${remoteAreaStatus}, Total: ${totalCourierCharge}`,
+      });
+    }
+
+    sale.updatedBy = ctx.user._id || ctx.user.id;
+
+    await sale.save({ session });
+
+    await session.commitTransaction();
+
+    return sale;
+  } catch (err) {
+    await session.abortTransaction();
+
+    console.error("❌ UpdateCourierCharges Error:", {
+      message: err.message,
+      saleId,
+      userId: ctx.user?._id || ctx.user?.id,
+      stack: err.stack,
+    });
+
+    if (
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError ||
+      err instanceof UserInputError
+    ) {
+      throw err;
+    }
+
+    throw new ApolloError(
+      err.message || "Failed to update courier charges",
+      "UPDATE_COURIER_CHARGES_FAILED"
+    );
+  } finally {
+    session.endSession();
+  }
+},
+
 
 
 MarkDelivered: async (_, { saleId }, ctx) => {
@@ -1120,6 +1315,9 @@ MarkDelivered: async (_, { saleId }, ctx) => {
     }
 
     sale.totalCost = totalCost;
+
+    // Gross profit should stay product-based:
+    // Sales Revenue - Product COGS
     sale.grossProfit = Number(
       (Number(sale.totalAmount || 0) - totalCost).toFixed(2)
     );
@@ -1136,6 +1334,7 @@ MarkDelivered: async (_, { saleId }, ctx) => {
       sale.accounting = {};
     }
 
+    // 1. Sale revenue voucher
     if (!sale.accounting.salesPosted) {
       const salesVoucher = await postSaleRevenueVoucher(
         sale,
@@ -1147,6 +1346,7 @@ MarkDelivered: async (_, { saleId }, ctx) => {
       sale.accounting.salesVoucher = salesVoucher._id;
     }
 
+    // 2. Product COGS voucher
     if (!sale.accounting.cogsPosted) {
       const cogsVoucher = await postSaleCOGSVoucher(
         sale,
@@ -1156,6 +1356,27 @@ MarkDelivered: async (_, { saleId }, ctx) => {
 
       sale.accounting.cogsPosted = true;
       sale.accounting.cogsVoucher = cogsVoucher._id;
+    }
+
+    // 3. Courier expense voucher
+    // Normal courier charge is saved as CONFIRMED at MarkOutForDelivery.
+    // Remote/corrected courier charge may become ADJUSTED from UpdateCourierCharges.
+    if (
+      ["CONFIRMED", "ADJUSTED"].includes(sale.courier?.chargeStatus) &&
+      Number(sale.courier?.charges?.totalCourierCharge || 0) > 0 &&
+      !sale.accounting.courierExpensePosted
+    ) {
+      const courierVoucher = await postSaleCourierExpenseVoucher(
+        sale,
+        ctx.user,
+        session
+      );
+
+      sale.accounting.courierExpensePosted = true;
+      sale.accounting.courierExpenseVoucher = courierVoucher._id;
+      sale.accounting.courierExpenseAmount = Number(
+        sale.courier.charges.totalCourierCharge || 0
+      );
     }
 
     if (typeof pushHistory === "function") {

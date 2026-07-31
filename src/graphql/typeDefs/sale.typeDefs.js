@@ -22,30 +22,49 @@ ReturnSale(
   returnReason: String
 ): Sale!
   MarkSalePaid(saleId: ID!, payment: PaymentInput!): Sale!
-  UpdateSale(
-    saleId: ID!
-    data: UpdateSaleInput!
-  ): Sale!
+  UpdateSale( saleId: ID! data: UpdateSaleInput! ): Sale!
+ UpdateCourierCharges(
+  saleId: ID!
+  data: UpdateCourierChargesInput!
+): Sale!
+
 }
 
 
 scalar Date
 
+input UpdateCourierChargesInput {
+  remoteAreaStatus: String! # NORMAL or REMOTE
+  remoteCharge: Float
+  chargeNote: String
+}
+
 
   # ✅ Courier breakdown types
-  type CourierCharges {
-    baseCharge: Float
-    codCharge: Float
-    returnCharge: Float
-  }
+type CourierCharges {
+  baseCharge: Float
+  codCharge: Float
+  remoteCharge: Float
+  totalCourierCharge: Float
+  returnCharge: Float
+}
 
-  type SaleCourier {
-    courierId: ID
-    courierName: String
-    charges: CourierCharges
-    trackingNo: String
-    trackingUrl: String
-  }
+type SaleCourier {
+  courierId: ID
+  courierName: String
+
+  remoteAreaStatus: String
+  chargeStatus: String
+
+  charges: CourierCharges
+
+  chargeUpdatedAt: Date
+  chargeUpdatedBy: ID
+  chargeNote: String
+
+  trackingNo: String
+  trackingUrl: String
+}
 
 type SaleItem {
   product: ID!
@@ -163,7 +182,7 @@ input CreateSaleInput {
 }
 
 
-
+x
 
 
  # ✅ Updated OutForDelivery input to use courierId + optional COD logic
@@ -175,6 +194,9 @@ input CreateSaleInput {
     shippedAt: Date
     isCOD: Boolean
   }
+
+
+
 
 
 input SaleFilterInput {

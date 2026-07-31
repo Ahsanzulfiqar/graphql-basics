@@ -440,3 +440,93 @@ export async function postSaleCOGSVoucher(sale, user, session) {
     session
   );
 }
+
+export async function postSaleCourierExpenseVoucher(sale, user, session) {
+  if (!sale?._id) {
+    throw new UserInputError("Sale is required");
+  }
+
+  const createdBy = user?._id || user?.id;
+
+  if (!createdBy) {
+    throw new UserInputError("User context is required");
+  }
+
+  const totalCourierCharge = round2(
+    sale.courier?.charges?.totalCourierCharge || 0
+  );
+
+  if (totalCourierCharge <= 0) {
+    throw new UserInputError("Courier charge must be greater than 0");
+  }
+
+  if (sale.courier?.chargeStatus !== "CONFIRMED") {
+    throw new UserInputError("Courier charge must be confirmed before posting");
+  }
+
+  const alreadyPostedAmount = round2(
+    sale.accounting?.courierExpenseAmount || 0
+  );
+
+  const difference = round2(totalCourierCharge - alreadyPostedAmount);
+
+  if (difference === 0) {
+    throw new UserInputError("Courier expense already posted with same amount");
+  }
+
+  const courierExpenseAccount = await getAccountByName(
+    "Courier Expense",
+    session
+  );
+
+  const courierPayableAccount = await getAccountByName(
+    "Courier Payable",
+    session
+  );
+
+  const isIncrease = difference > 0;
+  const amount = Math.abs(difference);
+
+  return createAccountingVoucher(
+    {
+      date: new Date(),
+      memo: isIncrease
+        ? `Courier expense posted - ${sale.invoiceNo || sale._id}`
+        : `Courier expense adjustment - ${sale.invoiceNo || sale._id}`,
+      createdBy,
+      sourceType: "SALE_COURIER",
+      sourceId: sale._id,
+      paymentMode: null,
+      lines: isIncrease
+        ? [
+            {
+              accountId: courierExpenseAccount._id,
+              debit: amount,
+              credit: 0,
+              memo: "Courier expense",
+            },
+            {
+              accountId: courierPayableAccount._id,
+              debit: 0,
+              credit: amount,
+              memo: "Courier payable",
+            },
+          ]
+        : [
+            {
+              accountId: courierPayableAccount._id,
+              debit: amount,
+              credit: 0,
+              memo: "Courier payable reduced",
+            },
+            {
+              accountId: courierExpenseAccount._id,
+              debit: 0,
+              credit: amount,
+              memo: "Courier expense reduced",
+            },
+          ],
+    },
+    session
+  );
+}
