@@ -42,23 +42,23 @@ const voucherSchema = new mongoose.Schema(
     voidReason: String,
     voidAt: Date,
 
-    sourceType: {
+sourceType: {
   type: String,
- enum: [
-  "MANUAL",
-  "SALE",
-  "SALE_PAYMENT",
-  "PURCHASE",
-  "PURCHASE_PAYMENT",
-  "MONEY_IN",
-  "MONEY_OUT",
-  "EXPENSE",
-  "STOCK_ADJUSTMENT",
-  "OPENING_BALANCE",
-  "SALES_RETURN",
-  "PURCHASE_RETURN",
-  "SALE_COGS"
-],
+  enum: [
+    "MANUAL",
+    "SALE",
+    "SALE_PAYMENT",
+    "PURCHASE",
+    "PURCHASE_PAYMENT",
+    "MONEY_IN",
+    "MONEY_OUT",
+    "EXPENSE",
+    "STOCK_ADJUSTMENT",
+    "OPENING_BALANCE",
+    "SALES_RETURN",
+    "PURCHASE_RETURN",
+    "SALE_COGS",
+  ],
   default: "MANUAL",
 },
 

@@ -878,9 +878,11 @@ console.log()
 },
 
 UpdateStockWithBatches: async (_, { data }, ctx) => {
-  if (!ctx.user) throw new AuthenticationError("Login required");
+  if (!ctx.user) {
+    throw new AuthenticationError("Login required");
+  }
 
-  if (!["ADMIN"].includes(ctx.user.role)) {
+  if (ctx.user.role !== "ADMIN") {
     throw new ForbiddenError("User not allowed to update stock");
   }
 
@@ -892,44 +894,83 @@ UpdateStockWithBatches: async (_, { data }, ctx) => {
     note,
   } = data;
 
-  if (!batches || batches.length === 0) {
+  if (!mongoose.Types.ObjectId.isValid(warehouseId)) {
+    throw new UserInputError("Invalid warehouse ID");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new UserInputError("Invalid product ID");
+  }
+
+  if (
+    variantId &&
+    !mongoose.Types.ObjectId.isValid(variantId)
+  ) {
+    throw new UserInputError("Invalid variant ID");
+  }
+
+  if (!Array.isArray(batches) || batches.length === 0) {
     throw new UserInputError("At least one batch is required");
   }
 
   const session = await mongoose.startSession();
-  session.startTransaction();
+  const EPSILON = 0.000001;
 
   try {
-    const warehouse = await WAREHOUSE.findById(warehouseId).session(session);
-    if (!warehouse) throw new UserInputError("Warehouse not found");
+    session.startTransaction();
 
-    const product = await PRODUCT.findById(productId).session(session);
-    if (!product) throw new UserInputError("Product not found");
+    const [warehouse, product] = await Promise.all([
+      WAREHOUSE.findById(warehouseId).session(session),
+      PRODUCT.findById(productId).session(session),
+    ]);
+
+    if (!warehouse) {
+      throw new UserInputError("Warehouse not found");
+    }
+
+    if (!product) {
+      throw new UserInputError("Product not found");
+    }
 
     if (variantId) {
-      const variant = await PRODUCTVARIANT.findById(variantId).session(session);
-      if (!variant) throw new UserInputError("Variant not found");
+      const variant = await PRODUCTVARIANT.findById(
+        variantId
+      ).session(session);
+
+      if (!variant) {
+        throw new UserInputError("Variant not found");
+      }
 
       if (String(variant.product) !== String(productId)) {
-        throw new UserInputError("Variant does not belong to product");
+        throw new UserInputError(
+          "Variant does not belong to product"
+        );
       }
     }
 
-    const query = {
+    // Handles both missing variant field and variant: null
+    const stockQuery = {
       warehouse: warehouseId,
       product: productId,
     };
 
     if (variantId) {
-      query.variant = variantId;
+      stockQuery.variant = variantId;
     } else {
-      query.variant = { $exists: false };
+      stockQuery.$or = [
+        { variant: null },
+        { variant: { $exists: false } },
+      ];
     }
 
-    let stock = await WAREHOUSE_STOCK.findOne(query).session(session);
+    const stock = await WAREHOUSE_STOCK.findOne(
+      stockQuery
+    ).session(session);
 
     if (!stock) {
-      throw new UserInputError("Stock record not found. Please add opening stock first.");
+      throw new UserInputError(
+        "Stock record not found. Please add opening stock first."
+      );
     }
 
     const oldQty = Number(stock.quantity || 0);
@@ -939,73 +980,193 @@ UpdateStockWithBatches: async (_, { data }, ctx) => {
     let newQty = 0;
     let newValue = 0;
 
-    const cleanBatches = batches.map((b) => {
-      if (b.quantity < 0) {
-        throw new UserInputError("Batch quantity cannot be negative");
-      }
+    // Prevent duplicate batch + expiry combinations
+    const batchKeys = new Set();
 
-      if (b.unitCost == null || b.unitCost < 0) {
-        throw new UserInputError("Batch unitCost is required and cannot be negative");
-      }
+    const cleanBatches = batches
+      .map((batch, index) => {
+        if (
+          batch.quantity === null ||
+          batch.quantity === undefined ||
+          batch.quantity === ""
+        ) {
+          throw new UserInputError(
+            `Quantity is required in batch ${index + 1}`
+          );
+        }
 
-      const qty = Number(b.quantity);
-      const cost = Number(b.unitCost);
+        if (
+          batch.unitCost === null ||
+          batch.unitCost === undefined ||
+          batch.unitCost === ""
+        ) {
+          throw new UserInputError(
+            `Unit cost is required in batch ${index + 1}`
+          );
+        }
 
-      newQty += qty;
-      newValue += qty * cost;
+        const qty = Number(batch.quantity);
+        const cost = Number(batch.unitCost);
 
-      return {
-        batchNo: b.batchNo,
-        expiryDate: b.expiryDate ? new Date(b.expiryDate) : undefined,
-        quantity: qty,
-        unitCost: cost,
-      };
-    });
+        // Point 1: proper numeric validation
+        if (!Number.isFinite(qty) || qty < 0) {
+          throw new UserInputError(
+            `Invalid quantity in batch ${index + 1}`
+          );
+        }
 
-    if (newQty < Number(stock.reserved || 0)) {
+        if (!Number.isFinite(cost) || cost < 0) {
+          throw new UserInputError(
+            `Invalid unit cost in batch ${index + 1}`
+          );
+        }
+
+        // Point 2: expiry-date validation
+        let expiryDate;
+
+        if (batch.expiryDate) {
+          expiryDate = new Date(batch.expiryDate);
+
+          if (Number.isNaN(expiryDate.getTime())) {
+            throw new UserInputError(
+              `Invalid expiry date in batch ${index + 1}`
+            );
+          }
+        }
+
+        const normalizedBatchNo = String(
+          batch.batchNo || ""
+        )
+          .trim()
+          .toUpperCase();
+
+        const expiryKey = expiryDate
+          ? expiryDate.toISOString().slice(0, 10)
+          : "NO-EXPIRY";
+
+        const batchKey = `${normalizedBatchNo}|${expiryKey}`;
+
+        // Point 3: duplicate batch prevention
+        if (batchKeys.has(batchKey)) {
+          throw new UserInputError(
+            `Duplicate batch found: ${
+              batch.batchNo || `Batch ${index + 1}`
+            }`
+          );
+        }
+
+        batchKeys.add(batchKey);
+
+        newQty += qty;
+        newValue += qty * cost;
+
+        return {
+          batchNo: batch.batchNo?.trim() || null,
+          expiryDate,
+          quantity: qty,
+          unitCost: cost,
+        };
+      })
+      // Do not keep empty batches in current inventory
+      .filter((batch) => batch.quantity > 0);
+
+    const reservedQty = Number(stock.reserved || 0);
+
+    if (newQty < reservedQty) {
       throw new UserInputError(
-        `New stock quantity cannot be less than reserved quantity (${stock.reserved})`
+        `New stock quantity cannot be less than reserved quantity (${reservedQty})`
       );
     }
 
-    stock.batches = cleanBatches;
-    stock.quantity = newQty;
-    stock.avgCost = newQty > 0 ? newValue / newQty : 0;
-
-    await stock.save({ session });
+    const newAvgCost =
+      newQty > 0 ? newValue / newQty : 0;
 
     const qtyDifference = newQty - oldQty;
     const valueDifference = newValue - oldValue;
 
-    await STOCK_LEDGER.create(
-      [
-        {
-          warehouse: warehouseId,
-          product: productId,
-          variant: variantId || undefined,
+    const quantityChanged =
+      Math.abs(qtyDifference) > EPSILON;
 
-          quantityIn: qtyDifference > 0 ? qtyDifference : 0,
-          quantityOut: qtyDifference < 0 ? Math.abs(qtyDifference) : 0,
+    const valueChanged =
+      Math.abs(valueDifference) > EPSILON;
 
-          unitCost: stock.avgCost,
-          totalValue: valueDifference,
+    const isCostOnlyRevaluation =
+      !quantityChanged && valueChanged;
 
-          refType: "ADJUSTMENT",
-          refNo: `STK-UPD-${Date.now()}`,
-          notes: note || "Stock updated with batches",
-          createdBy: ctx.user._id,
-        },
-      ],
-      { session }
-    );
+    /*
+     * Point 6:
+     * Only the current WarehouseStock record is updated.
+     * Purchases and historical sales are not changed.
+     */
+    stock.batches = cleanBatches;
+    stock.quantity = newQty;
+    stock.avgCost = newAvgCost;
+
+    await stock.save({ session });
+
+    // Point 7: do not create ledger when nothing changed
+    if (quantityChanged || valueChanged) {
+      let ledgerUnitCost = newAvgCost;
+
+      if (qtyDifference < 0) {
+        ledgerUnitCost = oldAvgCost;
+      }
+
+      // Point 5: separate cost-only revaluation
+      const refType = isCostOnlyRevaluation
+        ? "COST_REVALUATION"
+        : "ADJUSTMENT";
+
+      const refNo = `STK-UPD-${Date.now()}-${new mongoose.Types.ObjectId()
+        .toString()
+        .slice(-6)
+        .toUpperCase()}`;
+
+      await STOCK_LEDGER.create(
+        [
+          {
+            warehouse: warehouseId,
+            product: productId,
+            variant: variantId || undefined,
+
+            quantityIn:
+              qtyDifference > 0 ? qtyDifference : 0,
+
+            quantityOut:
+              qtyDifference < 0
+                ? Math.abs(qtyDifference)
+                : 0,
+
+            unitCost: ledgerUnitCost,
+
+            // Positive or negative inventory-value difference
+            totalValue: valueDifference,
+
+            refType,
+            refNo,
+
+            notes:
+              note ||
+              `Stock correction: quantity ${oldQty} → ${newQty}, average cost ${oldAvgCost.toFixed(
+                4
+              )} → ${newAvgCost.toFixed(4)}, value ${oldValue.toFixed(
+                2
+              )} → ${newValue.toFixed(2)}.`,
+
+            createdBy: ctx.user._id,
+          },
+        ],
+        { session }
+      );
+    }
 
     await session.commitTransaction();
-    session.endSession();
 
     return stock;
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
 
     if (
       err instanceof UserInputError ||
@@ -1015,7 +1176,13 @@ UpdateStockWithBatches: async (_, { data }, ctx) => {
       throw err;
     }
 
-    throw new ApolloError(err.message || "Failed to update stock with batches");
+    throw new ApolloError(
+      err.message ||
+        "Failed to update warehouse stock with batches"
+    );
+  } finally {
+    // Point 8: session always closes
+    await session.endSession();
   }
 },
     

@@ -149,7 +149,7 @@ input SaleItemInput {
 input CreateSaleInput {
   projectId: ID!
   sellerId: ID!
-  warehouseId: ID!
+  warehouseId: ID
   invoiceNo: String
   customerName: String
   customerPhone: String
