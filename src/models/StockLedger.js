@@ -16,7 +16,10 @@ transfer: {
   ref: "stockTransfer",
 },
 
-
+sale: {
+  type: Schema.Types.ObjectId,
+  ref: "sale",
+},
     product: {
       type: Schema.Types.ObjectId,
       ref: "product",

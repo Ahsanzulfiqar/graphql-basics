@@ -43,7 +43,23 @@ const accountTypeDefs = gql`
 
     CreateMoneyIn(data: CreateMoneyInInput!): Voucher!
     CreateMoneyOut(data: CreateMoneyOutInput!): Voucher!
+
+    CreateOpeningBalance(data: CreateOpeningBalanceInput!): Voucher!
   }
+
+  enum OpeningBalanceType {
+  DEBIT
+  CREDIT
+}
+
+input CreateOpeningBalanceInput {
+  date: Date
+  accountId: ID!
+  amount: Float!
+  balanceType: OpeningBalanceType!
+  memo: String
+}
+
 
   enum AccountType {
     ASSET

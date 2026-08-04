@@ -365,6 +365,14 @@ GetTrialBalance: async (_, { from, to }, ctx) => {
           parentId: equity._id,
         });
 
+        await createIfMissing({
+  code: "3990",
+  name: "Opening Balance Equity",
+  type: "EQUITY",
+  parentId: equity._id,
+});
+
+
         // Income Children
         await createIfMissing({
           code: "4010",
@@ -415,6 +423,7 @@ GetTrialBalance: async (_, { from, to }, ctx) => {
   type: "EXPENSE",
   parentId: expenses._id,
 });
+
 
 
         return await ACCOUNT.find({
@@ -948,6 +957,184 @@ if (!createdBy || !mongoose.Types.ObjectId.isValid(createdBy)) {
     throw new ApolloError(err.message || "Failed to create money out");
   }
 },
+
+CreateOpeningBalance: async (_, { data }, ctx) => {
+  requireRoles(ctx, ["ADMIN"]);
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const amount = Number(data.amount || 0);
+
+    if (amount <= 0) {
+      throw new UserInputError("Opening balance amount must be greater than 0");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(data.accountId)) {
+      throw new UserInputError("Invalid accountId");
+    }
+
+    const balanceType = String(data.balanceType || "").toUpperCase();
+
+    if (!["DEBIT", "CREDIT"].includes(balanceType)) {
+      throw new UserInputError("balanceType must be DEBIT or CREDIT");
+    }
+
+    const account = await ACCOUNT.findOne({
+      _id: data.accountId,
+      isDeleted: { $ne: true },
+      isActive: true,
+    }).session(session);
+
+    if (!account) {
+      throw new UserInputError("Account not found or inactive");
+    }
+
+    const openingEquity = await ACCOUNT.findOne({
+      name: "Opening Balance Equity",
+      type: "EQUITY",
+      isDeleted: { $ne: true },
+      isActive: true,
+    }).session(session);
+
+    if (!openingEquity) {
+      throw new UserInputError(
+        "Opening Balance Equity account not found. Please run SeedDefaultAccounts first."
+      );
+    }
+
+    if (String(account._id) === String(openingEquity._id)) {
+      throw new UserInputError(
+        "Opening balance cannot be posted directly to Opening Balance Equity"
+      );
+    }
+
+    const alreadyPosted = await VOUCHER.exists({
+      sourceType: "OPENING_BALANCE",
+      sourceId: account._id,
+      status: { $ne: "VOID" },
+    }).session(session);
+
+    if (alreadyPosted) {
+      throw new UserInputError(
+        "Opening balance already posted for this account"
+      );
+    }
+
+    const createdBy = ctx.user?._id || ctx.user?.id;
+
+    if (!createdBy || !mongoose.Types.ObjectId.isValid(createdBy)) {
+      throw new UserInputError("Valid user context is required");
+    }
+
+    const voucherNo = await getNextNo("voucher", "JV", session);
+
+    const memo =
+      data.memo?.trim() ||
+      `Opening balance for ${account.name}`;
+
+    const [voucher] = await VOUCHER.create(
+      [
+        {
+          voucherNo,
+          type: "JOURNAL",
+          date: data.date ? new Date(data.date) : new Date(),
+          memo,
+          status: "POSTED",
+          createdBy,
+          sourceType: "OPENING_BALANCE",
+          sourceId: account._id,
+          paymentMode: null,
+        },
+      ],
+      { session }
+    );
+
+    let lines = [];
+
+    if (balanceType === "DEBIT") {
+      lines = [
+        {
+          voucherId: voucher._id,
+          accountId: account._id,
+          debit: amount,
+          credit: 0,
+          memo,
+          sourceType: "OPENING_BALANCE",
+          sourceId: account._id,
+          paymentMode: null,
+        },
+        {
+          voucherId: voucher._id,
+          accountId: openingEquity._id,
+          debit: 0,
+          credit: amount,
+          memo: "Opening balance equity",
+          sourceType: "OPENING_BALANCE",
+          sourceId: account._id,
+          paymentMode: null,
+        },
+      ];
+    }
+
+    if (balanceType === "CREDIT") {
+      lines = [
+        {
+          voucherId: voucher._id,
+          accountId: openingEquity._id,
+          debit: amount,
+          credit: 0,
+          memo: "Opening balance equity",
+          sourceType: "OPENING_BALANCE",
+          sourceId: account._id,
+          paymentMode: null,
+        },
+        {
+          voucherId: voucher._id,
+          accountId: account._id,
+          debit: 0,
+          credit: amount,
+          memo,
+          sourceType: "OPENING_BALANCE",
+          sourceId: account._id,
+          paymentMode: null,
+        },
+      ];
+    }
+
+    await VOUCHER_LINE.insertMany(lines, { session });
+
+    await session.commitTransaction();
+
+    return voucher;
+  } catch (err) {
+    await session.abortTransaction();
+
+    console.error("❌ CreateOpeningBalance Error:", {
+      message: err.message,
+      accountId: data?.accountId,
+      userId: ctx.user?._id || ctx.user?.id,
+      stack: err.stack,
+    });
+
+    if (err instanceof UserInputError) {
+      throw err;
+    }
+
+    if (err?.code === 11000) {
+      throw new UserInputError("Duplicate voucher number");
+    }
+
+    throw new ApolloError(
+      err.message || "Failed to create opening balance",
+      "CREATE_OPENING_BALANCE_FAILED"
+    );
+  } finally {
+    session.endSession();
+  }
+},
+
 
   },
 };

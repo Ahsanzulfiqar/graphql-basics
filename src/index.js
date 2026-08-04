@@ -49,6 +49,10 @@ const __dirname = path.dirname(__filename);
 
 // * DB Connection
 await connectToDB();
+
+
+
+
 // Create the schema, which will be used separately by ApolloServer and
 // the WebSocket server.
 const schema = makeExecutableSchema({

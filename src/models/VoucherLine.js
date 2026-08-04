@@ -42,7 +42,8 @@ const voucherLineSchema = new mongoose.Schema(
     "MONEY_IN",
     "MONEY_OUT",
     "SALE_COGS",
-    "SALE_COURIER"
+    "SALE_COURIER",
+    "OPENING_BALANCE",
   ],
   default: "MANUAL",
 },

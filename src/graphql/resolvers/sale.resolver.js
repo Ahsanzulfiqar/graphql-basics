@@ -1555,6 +1555,7 @@ CancelSale: async (_, { saleId, cancelReason }, ctx) => {
 
 
 ReturnSale: async (_, { saleId, returnReason }, ctx) => {
+  console.log(returnReason,"returnReason")
   if (!ctx.user) {
     throw new AuthenticationError("Login required");
   }
@@ -1583,120 +1584,173 @@ ReturnSale: async (_, { saleId, returnReason }, ctx) => {
       throw new UserInputError("Sale not found");
     }
 
-    // Only delivered sales can be returned
-    if (sale.status !== "delivered") {
+    if (sale.status === "returned") {
+      throw new UserInputError("This sale has already been returned");
+    }
+
+    if (sale.status === "cancelled") {
+      throw new UserInputError("This sale is already cancelled");
+    }
+
+    const allowedStatuses = [
+      "draft",
+      "confirmed",
+      "out_for_delivery",
+      "delivered",
+    ];
+
+    if (!allowedStatuses.includes(sale.status)) {
       throw new UserInputError(
-        "Only delivered sale can be returned"
+        `Sale with status ${sale.status} cannot be returned`
       );
     }
 
+    const oldStatus = sale.status;
+    const returnedAt = new Date();
+
     /*
-     * Fetch the stock ledger entries created when
-     * this sale was delivered.
+     * CASE 1:
+     * Draft sale
+     * No stock reserved.
+     * No stock consumed.
+     * Just mark returned.
      */
-    let saleOutRows = await STOCK_LEDGER.find({
-      refType: "SALE",
-      sale: sale._id,
-      quantityOut: { $gt: 0 },
-    })
-      .session(session)
-      .lean();
+    if (oldStatus === "draft") {
+      sale.status = "returned";
+    }
 
-    // Fallback for older ledger records
-    if (!saleOutRows.length) {
-      const refNo = sale.invoiceNo || String(sale._id);
+    /*
+     * CASE 2:
+     * Confirmed or out_for_delivery sale
+     * Stock is reserved but not consumed.
+     * Release reserved stock only.
+     * Do NOT create SALE_RETURN ledger.
+     */
+    if (["confirmed", "out_for_delivery"].includes(oldStatus)) {
+      if (!sale.items || sale.items.length === 0) {
+        throw new UserInputError("Sale has no items");
+      }
 
-      saleOutRows = await STOCK_LEDGER.find({
+      for (const it of sale.items) {
+        const qty = Number(it.quantity || 0);
+
+        if (qty <= 0) continue;
+
+        await releaseReservedStock(
+          {
+            warehouseId: sale.warehouse,
+            productId: it.product,
+            variantId: it.variant || undefined,
+            qty,
+            user: ctx.user,
+          },
+          session
+        );
+      }
+
+      sale.status = "returned";
+    }
+
+    /*
+     * CASE 3:
+     * Delivered sale
+     * Stock was already consumed by FIFO.
+     * Add stock back to same consumed batches.
+     * Create SALE_RETURN stock ledger.
+     */
+    if (oldStatus === "delivered") {
+      let saleOutRows = await STOCK_LEDGER.find({
         refType: "SALE",
-        refNo,
+        sale: sale._id,
         quantityOut: { $gt: 0 },
       })
         .session(session)
         .lean();
-    }
 
-    if (!saleOutRows.length) {
-      throw new UserInputError(
-        "Sale ledger not found. Cannot return safely."
-      );
-    }
+      // Fallback for older ledger records
+      if (!saleOutRows.length) {
+        const refNo = sale.invoiceNo || String(sale._id);
 
-    /*
-     * Prevent stock from being returned twice.
-     */
-    const existingReturn = await STOCK_LEDGER.findOne({
-      refType: "SALE_RETURN",
-      sale: sale._id,
-    }).session(session);
-
-    if (existingReturn) {
-      throw new UserInputError(
-        "This sale stock has already been returned"
-      );
-    }
-
-    const returnLedgerDocs = [];
-
-    const returnRef = `RET-${
-      sale.invoiceNo || String(sale._id)
-    }`;
-
-    for (const row of saleOutRows) {
-      const qty = Number(row.quantityOut || 0);
-
-      if (qty <= 0) continue;
-
-      // Add stock back to the same batch consumed on delivery
-      await addBackToBatch(
-        {
-          warehouseId: row.warehouse,
-          productId: row.product,
-          variantId: row.variant || undefined,
-          qty,
-          batchNo: row.batchNo,
-          expiryDate: row.expiryDate,
-        },
-        session
-      );
-
-      const entry = {
-        sale: sale._id,
-        warehouse: row.warehouse,
-        product: row.product,
-
-        quantityIn: qty,
-        quantityOut: 0,
-
-        batchNo: row.batchNo,
-        expiryDate: row.expiryDate,
-
-        refType: "SALE_RETURN",
-        refNo: returnRef,
-
-        notes: `Sale returned. Reason: ${cleanReturnReason}`,
-      };
-
-      if (row.variant) {
-        entry.variant = row.variant;
+        saleOutRows = await STOCK_LEDGER.find({
+          refType: "SALE",
+          refNo,
+          quantityOut: { $gt: 0 },
+        })
+          .session(session)
+          .lean();
       }
 
-      returnLedgerDocs.push(entry);
+      if (!saleOutRows.length) {
+        throw new UserInputError(
+          "Sale delivery ledger not found. Cannot return delivered sale safely."
+        );
+      }
+
+      const existingReturn = await STOCK_LEDGER.findOne({
+        refType: "SALE_RETURN",
+        sale: sale._id,
+      }).session(session);
+
+      if (existingReturn) {
+        throw new UserInputError(
+          "This sale stock has already been returned"
+        );
+      }
+
+      const returnLedgerDocs = [];
+
+      const returnRef = `RET-${sale.invoiceNo || String(sale._id)}`;
+
+      for (const row of saleOutRows) {
+        const qty = Number(row.quantityOut || 0);
+
+        if (qty <= 0) continue;
+
+        await addBackToBatch(
+          {
+            warehouseId: row.warehouse,
+            productId: row.product,
+            variantId: row.variant || undefined,
+            qty,
+            batchNo: row.batchNo,
+            expiryDate: row.expiryDate,
+          },
+          session
+        );
+
+        const entry = {
+          sale: sale._id,
+          warehouse: row.warehouse,
+          product: row.product,
+
+          quantityIn: qty,
+          quantityOut: 0,
+
+          batchNo: row.batchNo,
+          expiryDate: row.expiryDate,
+
+          refType: "SALE_RETURN",
+          refNo: returnRef,
+
+          notes: `Sale returned. Reason: ${cleanReturnReason}`,
+        };
+
+        if (row.variant) {
+          entry.variant = row.variant;
+        }
+
+        returnLedgerDocs.push(entry);
+      }
+
+      if (!returnLedgerDocs.length) {
+        throw new UserInputError("No stock quantity found to return");
+      }
+
+      await STOCK_LEDGER.insertMany(returnLedgerDocs, { session });
+
+      sale.status = "returned";
     }
 
-    if (!returnLedgerDocs.length) {
-      throw new UserInputError(
-        "No stock quantity found to return"
-      );
-    }
-
-    await STOCK_LEDGER.insertMany(returnLedgerDocs, {
-      session,
-    });
-
-    const returnedAt = new Date();
-
-    // Update sale
-    sale.status = "returned";
     sale.returnReason = cleanReturnReason;
 
     if (!sale.statusTimestamps) {
@@ -1706,13 +1760,13 @@ ReturnSale: async (_, { saleId, returnReason }, ctx) => {
     sale.statusTimestamps.returnedAt = returnedAt;
 
     const historyNote =
-      `Sale returned and stock added back. ` +
+      `Sale returned from ${oldStatus}. ` +
       `Reason: ${cleanReturnReason}`;
 
     if (typeof pushHistory === "function") {
       pushHistory(sale, {
         status: "returned",
-        by: ctx.user._id,
+        by: ctx.user._id || ctx.user.id,
         note: historyNote,
       });
     } else {
@@ -1723,10 +1777,12 @@ ReturnSale: async (_, { saleId, returnReason }, ctx) => {
       sale.statusHistory.push({
         status: "returned",
         at: returnedAt,
-        by: ctx.user._id,
+        by: ctx.user._id || ctx.user.id,
         note: historyNote,
       });
     }
+
+    sale.updatedBy = ctx.user._id || ctx.user.id;
 
     await sale.save({ session });
 
@@ -1736,8 +1792,24 @@ ReturnSale: async (_, { saleId, returnReason }, ctx) => {
   } catch (err) {
     await session.abortTransaction();
 
+    console.error("❌ ReturnSale Error:", {
+      message: err.message,
+      saleId,
+      userId: ctx.user?._id || ctx.user?.id,
+      stack: err.stack,
+    });
+
+    if (
+      err instanceof AuthenticationError ||
+      err instanceof ForbiddenError ||
+      err instanceof UserInputError
+    ) {
+      throw err;
+    }
+
     throw new ApolloError(
-      err.message || "Failed to return sale"
+      err.message || "Failed to return sale",
+      "RETURN_SALE_FAILED"
     );
   } finally {
     session.endSession();
